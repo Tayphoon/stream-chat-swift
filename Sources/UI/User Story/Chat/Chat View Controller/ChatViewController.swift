@@ -62,7 +62,13 @@ open class ChatViewController: ViewController, UITableViewDataSource, UITableVie
     }()
     
     /// A channel presenter.
-    public var channelPresenter: ChannelPresenter?
+    public var channelPresenter: ChannelPresenter? {
+        willSet {
+            if let presenter = newValue {
+                configure(with: presenter)
+            }
+        }
+    }
     private var changesEnabled: Bool = false
     
     open override func viewDidLoad() {
@@ -71,40 +77,9 @@ open class ChatViewController: ViewController, UITableViewDataSource, UITableVie
         setupComposerView()
         updateTitle()
         
-        guard let presenter = channelPresenter else {
-            return
+        if let presenter = channelPresenter {
+            configure(with: presenter)
         }
-        
-        composerView.uploader = presenter.uploader
-        
-        presenter.changes
-            .filter { [weak self] _ in
-                if let self = self {
-                    return self.changesEnabled && self.isVisible
-                }
-                
-                return false
-            }
-            .drive(onNext: { [weak self] in self?.updateTableView(with: $0) })
-            .disposed(by: disposeBag)
-        
-        if presenter.isEmpty {
-            channelPresenter?.reload()
-        } else {
-            refreshTableView(scrollToBottom: true, animated: false)
-        }
-        
-        changesEnabled = true
-        
-        InternetConnection.shared.isAvailableObservable
-            .observeOn(MainScheduler.instance)
-            .subscribe(onNext: { [weak self] in
-                if let self = self {
-                    self.updateFooterView()
-                    self.composerView.isEnabled = $0
-                }
-            })
-            .disposed(by: disposeBag)
     }
     
     open override func viewWillAppear(_ animated: Bool) {
@@ -183,6 +158,39 @@ open class ChatViewController: ViewController, UITableViewDataSource, UITableVie
     
     private func markReadIfPossible() {
         channelPresenter?.markReadIfPossible().subscribe().disposed(by: disposeBag)
+    }
+    
+    private func configure(with presenter: ChannelPresenter) {
+        composerView.uploader = presenter.uploader
+        
+        presenter.changes
+            .filter { [weak self] _ in
+                if let self = self {
+                    return self.changesEnabled && self.isVisible
+                }
+                
+                return false
+            }
+            .drive(onNext: { [weak self] in self?.updateTableView(with: $0) })
+            .disposed(by: disposeBag)
+        
+        if presenter.isEmpty {
+            channelPresenter?.reload()
+        } else {
+            refreshTableView(scrollToBottom: true, animated: false)
+        }
+        
+        changesEnabled = true
+        
+        InternetConnection.shared.isAvailableObservable
+            .observeOn(MainScheduler.instance)
+            .subscribe(onNext: { [weak self] in
+                if let self = self {
+                    self.updateFooterView()
+                    self.composerView.isEnabled = $0
+                }
+            })
+            .disposed(by: disposeBag)
     }
 }
 
