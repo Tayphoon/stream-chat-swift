@@ -105,7 +105,6 @@ public final class WebSocket {
         if backgroundTask != .invalid {
             let goingToDisconnect: DispatchWorkItem = DispatchWorkItem { [weak self] in
                 self?.disconnect()
-                InternetConnection.shared.stopObserving()
             }
             
             webSocket.callbackQueue.asyncAfter(deadline: .now() + WebSocket.maxBackgroundTime, execute: goingToDisconnect)
@@ -138,6 +137,12 @@ public final class WebSocket {
             handshakeTimer.suspend()
             webSocket.disconnect()
             logger?.log("💔", "Disconnected deliberately")
+        }
+        
+        DispatchQueue.main.async {
+            if UIApplication.shared.appState == .background {
+                InternetConnection.shared.stopObserving()
+            }
         }
         
         cancelBackgroundWork()

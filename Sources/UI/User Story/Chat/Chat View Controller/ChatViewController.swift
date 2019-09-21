@@ -80,6 +80,8 @@ open class ChatViewController: ViewController, UITableViewDataSource, UITableVie
         if let presenter = channelPresenter {
             configure(with: presenter)
         }
+        
+        setupFooterUpdates()
     }
     
     open override func viewWillAppear(_ animated: Bool) {
@@ -88,7 +90,7 @@ open class ChatViewController: ViewController, UITableViewDataSource, UITableVie
         markReadIfPossible()
         
         if let presenter = channelPresenter, presenter.items != items {
-            let scrollToBottom = scrollEnabled && tableView.bottomContentOffset < .chatBottomThreshold
+            let scrollToBottom = items.isEmpty || (scrollEnabled && tableView.bottomContentOffset < .chatBottomThreshold)
             refreshTableView(scrollToBottom: scrollToBottom, animated: false)
         }
     }
@@ -154,6 +156,22 @@ open class ChatViewController: ViewController, UITableViewDataSource, UITableVie
                          subtitle: String? = nil,
                          highlighted: Bool) -> UITableViewCell? {
         return nil
+    }
+    
+    /// Setup Footer updates for environement updates.
+    open func setupFooterUpdates() {
+        Client.shared.connection
+            .observeOn(MainScheduler.instance)
+            .debounce(.milliseconds(500), scheduler: MainScheduler.instance)
+            .subscribe(onNext: { [weak self] connection in
+                if let self = self {
+                    self.updateFooterView()
+                    self.composerView.isEnabled = connection.isConnected
+                }
+            })
+            .disposed(by: disposeBag)
+        
+        updateFooterView()
     }
     
     private func markReadIfPossible() {

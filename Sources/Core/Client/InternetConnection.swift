@@ -31,41 +31,49 @@ public final class InternetConnection {
     }
     
     /// An observable Internet connection status.
-    public private(set) lazy var isAvailableObservable: Observable<Bool> = (reachability?.rx.reachabilityChanged
-        .subscribeOn(MainScheduler.instance)
+    public private(set) lazy var isAvailableObservable: Observable<Bool> = Observable.just(Void())
+        .observeOn(MainScheduler.instance)
+        .flatMapLatest { [weak self] _ -> Observable<Reachability.Connection> in
+            if let reachability = self?.reachability {
+                return reachability.rx.reachabilityChanged
+                    .map({ $0.connection })
+                    .startWith(reachability.connection)
+            }
+            
+            return .empty()
+        }
         .map {
-            if case .none = $0.connection {
+            if case .none = $0 {
                 return false
             }
             
             return true
         }
-        .startWith(isAvailable)
         .distinctUntilChanged()
         .do(onNext: { ClientLogger.log("🕸", $0 ? "Available 🙋‍♂️" : "Not Available 🤷‍♂️") })
-        .share(replay: 1, scope: .forever)) ?? .empty()
+        .share(replay: 1, scope: .forever)
     
     /// Init InternetConnection.
     public init() {
-        guard !isTests() else {
-            return
+        if !isTests() {
+            DispatchQueue.main.async { self.startObserving() }
         }
-        
-        DispatchQueue.main.async {
-            UIApplication.shared.rx.appState
-                .subscribe(onNext: { [unowned self] state in
-                    if state == .active {
-                        do {
-                            try self.reachability?.startNotifier()
-                            ClientLogger.log("🕸", "Notifying started 🏃‍♂️")
-                        } catch {
-                            let message = "InternetConnection tried to start notifying when app state became active."
-                            ClientLogger.log("🕸", error, message: message)
-                        }
-                    }
-                })
-                .disposed(by: self.disposeBag)
-        }
+    }
+    
+    private func startObserving() {
+        UIApplication.shared.rx.appState
+            .startWith(UIApplication.shared.appState)
+            .filter { $0 == .active }
+            .subscribe(onNext: { [unowned self] _ in
+                do {
+                    try self.reachability?.startNotifier()
+                    ClientLogger.log("🕸", "Notifying started 🏃‍♂️")
+                } catch {
+                    let message = "InternetConnection tried to start notifying when app state became active."
+                    ClientLogger.log("🕸", error, message: message)
+                }
+            })
+            .disposed(by: disposeBag)
     }
     
     /// Stop observing the Internet connection.
