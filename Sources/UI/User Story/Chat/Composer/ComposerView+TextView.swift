@@ -112,7 +112,7 @@ extension ComposerView: UITextViewDelegate {
             case .limit(let count):
                 let currentText = textView.text ?? ""
                 guard let stringRange = Range(range, in: currentText) else {
-                    return false
+                    return true
                 }
                 let updatedText = currentText.replacingCharacters(in: stringRange, with: text)
                 return updatedText.count <= count
