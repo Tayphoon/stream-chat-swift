@@ -63,7 +63,14 @@ extension ChannelPresenter {
         return .none
     }
     
-    func parseReplies(_ messagesResponse: MessagesResponse) -> ViewChanges {
+    func parsedRepliesResponse(_ repliesResponse: Observable<[Message]>) -> Driver<ViewChanges> {
+        return repliesResponse
+            .map { [weak self] in self?.parseReplies($0) ?? .none }
+            .filter { $0 != .none }
+            .asDriver { Driver.just(ViewChanges.error(AnyError(error: $0))) }
+    }
+    
+    func parseReplies(_ messages: [Message]) -> ViewChanges {
         guard let parentMessage = parentMessage else {
             return .none
         }
@@ -81,7 +88,7 @@ extension ChannelPresenter {
         }
         
         let currentCount = items.count
-        parse(messagesResponse.messages, to: &items, startIndex: 2, isNextPage: isNextPage)
+        parse(messages, to: &items, startIndex: 2, isNextPage: isNextPage)
         self.items = items
         
         return isNextPage ? .reloaded(max(items.count - currentCount - 1, 0), items) : .reloaded((items.count - 1), items)
@@ -103,6 +110,10 @@ extension ChannelPresenter {
         
         // Add chat items for messages.
         messages.enumerated().forEach { messageIndex, message in
+            if parentMessage == nil, message.parentId != nil {
+                return
+            }
+            
             if showStatuses, !yesterdayStatusAdded, message.created.isYesterday {
                 yesterdayStatusAdded = true
                 items.insert(.status(ChatItem.statusYesterdayTitle,

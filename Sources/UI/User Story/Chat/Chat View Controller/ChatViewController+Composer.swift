@@ -33,16 +33,17 @@ extension ChatViewController {
     }
     
     func setupComposerView() {
+        composerView.attachmentButton.isHidden = composerAddFileContainerView == nil
         composerView.addToSuperview(view)
         
-        if composerAddFileContainerView == nil {
-            composerView.attachmentButton.isHidden = true
-        } else {
+        if let composerAddFileContainerView = composerAddFileContainerView {
+            composerAddFileContainerView.add(to: composerView)
+            
             composerView.attachmentButton.rx.tap
                 .subscribe(onNext: { [weak self] in self?.showAddFileView() })
                 .disposed(by: disposeBag)
         }
-        
+
         composerView.textView.rx.text
             .skip(1)
             .unwrap()
@@ -97,7 +98,8 @@ extension ChatViewController {
         }
     }
     
-    private func send() {
+    /// Send a message.
+    public func send() {
         let text = composerView.text.trimmingCharacters(in: .whitespacesAndNewlines)
         let isMessageEditing = channelPresenter?.editMessage != nil
         
