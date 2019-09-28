@@ -12,7 +12,7 @@ import SnapKit
 import Nuke
 import RxSwift
 
-final class MessageTableViewCell: UITableViewCell, Reusable {
+public final class MessageTableViewCell: UITableViewCell, Reusable {
     typealias ReactionAction = (_ cell: UITableViewCell) -> Void
     typealias TapAction = (_ cell: MessageTableViewCell, _ message: Message) -> Void
     typealias AttachmentTapAction = (_ attachment: Attachment, _ at: Int, _ attachments: [Attachment]) -> Void
