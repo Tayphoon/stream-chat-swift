@@ -15,7 +15,7 @@ public final class AvatarView: EscapeBridgingImageView<Void>, Reusable {
     
     private var imageTask: ImageTask?
     
-    private lazy var avatarLabel: UILabel = {
+    public lazy var avatarLabel: UILabel = {
         let label = UILabel(frame: .zero)
         label.textAlignment = .center
         label.isHidden = true
