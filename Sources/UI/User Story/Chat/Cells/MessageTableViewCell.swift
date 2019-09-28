@@ -120,7 +120,7 @@ public final class MessageTableViewCell: UITableViewCell, Reusable {
         }
     }
     
-    override func prepareForReuse() {
+    public override func prepareForReuse() {
         reset()
         super.prepareForReuse()
     }
