@@ -23,7 +23,7 @@ public final class MessageTableViewCell: UITableViewCell, Reusable {
     
     private(set) var disposeBag = DisposeBag()
     
-    private(set) let avatarView = AvatarView(cornerRadius: .messageAvatarRadius)
+    public let avatarView = AvatarView(cornerRadius: .messageAvatarRadius)
     
     let reactionsContainer: UIImageView = UIImageView(frame: .zero)
     let reactionsOverlayView = UIView(frame: .zero)
@@ -31,7 +31,7 @@ public final class MessageTableViewCell: UITableViewCell, Reusable {
     var reactionsTailImageLeftConstraint: Constraint?
     var reactionsTailImageRightConstraint: Constraint?
     
-    private(set) let reactionsLabel: UILabel = {
+    public let reactionsLabel: UILabel = {
         let label = UILabel(frame: .zero)
         label.textAlignment = .center
         return label
@@ -46,21 +46,21 @@ public final class MessageTableViewCell: UITableViewCell, Reusable {
         return stackView
     }()
     
-    private(set) let nameLabel: UILabel = {
+    public let nameLabel: UILabel = {
         let label = UILabel(frame: .zero)
         label.font = .chatSmallBold
         label.textColor = .chatGray
         return label
     }()
     
-    private(set) let dateLabel: UILabel = {
+    public let dateLabel: UILabel = {
         let label = UILabel(frame: .zero)
         label.font = .chatSmall
         label.textColor = .chatGray
         return label
     }()
     
-    private(set) let infoLabel: UILabel = {
+    public let infoLabel: UILabel = {
         let label = UILabel(frame: .zero)
         label.font = UIFont.chatMedium.withTraits([.traitItalic])
         label.textColor = .chatGray
@@ -68,7 +68,7 @@ public final class MessageTableViewCell: UITableViewCell, Reusable {
         return label
     }()
     
-    private(set) let replyCountButton = UIButton(type: .custom)
+    let replyCountButton = UIButton(type: .custom)
     
     let readUsersView = ReadUsersView()
     var readUsersRightConstraint: Constraint?
@@ -93,7 +93,7 @@ public final class MessageTableViewCell: UITableViewCell, Reusable {
         return imageView
     }()
     
-    private(set) lazy var messageLabel: UILabel = {
+    public lazy var messageLabel: UILabel = {
         let label = UILabel(frame: .zero)
         label.numberOfLines = 0
         return label
