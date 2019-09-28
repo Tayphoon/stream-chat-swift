@@ -203,16 +203,6 @@ open class ChatViewController: ViewController, UITableViewDataSource, UITableVie
         
         isItemsValid = true
         changesEnabled = true
-
-        InternetConnection.shared.isAvailableObservable
-            .observeOn(MainScheduler.instance)
-            .subscribe(onNext: { [weak self] in
-                if let self = self {
-                    self.updateFooterView()
-                    self.composerView.isEnabled = $0
-                }
-            })
-            .disposed(by: disposeBag)
     }
 }
 
