@@ -23,7 +23,7 @@ public final class MessageTableViewCell: UITableViewCell, Reusable {
     
     private(set) var disposeBag = DisposeBag()
     
-    let avatarView = AvatarView(cornerRadius: .messageAvatarRadius)
+    private(set) let avatarView = AvatarView(cornerRadius: .messageAvatarRadius)
     
     let reactionsContainer: UIImageView = UIImageView(frame: .zero)
     let reactionsOverlayView = UIView(frame: .zero)
@@ -31,7 +31,7 @@ public final class MessageTableViewCell: UITableViewCell, Reusable {
     var reactionsTailImageLeftConstraint: Constraint?
     var reactionsTailImageRightConstraint: Constraint?
     
-    let reactionsLabel: UILabel = {
+    private(set) let reactionsLabel: UILabel = {
         let label = UILabel(frame: .zero)
         label.textAlignment = .center
         return label
@@ -46,21 +46,21 @@ public final class MessageTableViewCell: UITableViewCell, Reusable {
         return stackView
     }()
     
-    let nameLabel: UILabel = {
+    private(set) let nameLabel: UILabel = {
         let label = UILabel(frame: .zero)
         label.font = .chatSmallBold
         label.textColor = .chatGray
         return label
     }()
     
-    let dateLabel: UILabel = {
+    private(set) let dateLabel: UILabel = {
         let label = UILabel(frame: .zero)
         label.font = .chatSmall
         label.textColor = .chatGray
         return label
     }()
     
-    let infoLabel: UILabel = {
+    private(set) let infoLabel: UILabel = {
         let label = UILabel(frame: .zero)
         label.font = UIFont.chatMedium.withTraits([.traitItalic])
         label.textColor = .chatGray
@@ -68,7 +68,7 @@ public final class MessageTableViewCell: UITableViewCell, Reusable {
         return label
     }()
     
-    let replyCountButton = UIButton(type: .custom)
+    private(set) let replyCountButton = UIButton(type: .custom)
     
     let readUsersView = ReadUsersView()
     var readUsersRightConstraint: Constraint?
