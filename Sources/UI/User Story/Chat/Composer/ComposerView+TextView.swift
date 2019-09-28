@@ -109,11 +109,15 @@ extension ComposerView: UITextViewDelegate {
     
     public func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
         switch self.messageLimit {
-        case .limit(let count):
-            let newText = textView.text.replacingCharacters(in: range, with: text)
-            return newText.count <= count
-        default:
-            return true
+            case .limit(let count):
+                let currentText = textView.text ?? ""
+                guard let stringRange = Range(range, in: currentText) else {
+                    return false
+                }
+                let updatedText = currentText.replacingCharacters(in: stringRange, with: text)
+                return updatedText.count <= count
+            default:
+                return true
         }
     }
 }

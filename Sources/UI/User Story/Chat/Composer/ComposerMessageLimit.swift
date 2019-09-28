@@ -8,7 +8,7 @@
 
 import Foundation
 
-enum ComposerMessageLimit {
+public enum ComposerMessageLimit {
     case none
     case limit(count: Int)
 }
