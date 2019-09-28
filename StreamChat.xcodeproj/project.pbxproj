@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		465D64C2231808A2006BAE42 /* AttachmentTypeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 465D64C1231808A2006BAE42 /* AttachmentTypeTests.swift */; };
+		73E2EEF2233FA9CC00464B67 /* ComposerMessageLimit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73E2EEF1233FA9CC00464B67 /* ComposerMessageLimit.swift */; };
 		8A048E4A2331252400FDB3C0 /* Channel+Database.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A048E492331252400FDB3C0 /* Channel+Database.swift */; };
 		8A048E4C2332247900FDB3C0 /* ChannelPresenter+Request.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A048E4B2332247900FDB3C0 /* ChannelPresenter+Request.swift */; };
 		8A048E4E2332259400FDB3C0 /* ChannelPresenter+Events.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A048E4D2332259400FDB3C0 /* ChannelPresenter+Events.swift */; };
@@ -189,6 +190,7 @@
 
 /* Begin PBXFileReference section */
 		465D64C1231808A2006BAE42 /* AttachmentTypeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentTypeTests.swift; sourceTree = "<group>"; };
+		73E2EEF1233FA9CC00464B67 /* ComposerMessageLimit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerMessageLimit.swift; sourceTree = "<group>"; };
 		8A048E492331252400FDB3C0 /* Channel+Database.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Channel+Database.swift"; sourceTree = "<group>"; };
 		8A048E4B2332247900FDB3C0 /* ChannelPresenter+Request.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ChannelPresenter+Request.swift"; sourceTree = "<group>"; };
 		8A048E4D2332259400FDB3C0 /* ChannelPresenter+Events.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ChannelPresenter+Events.swift"; sourceTree = "<group>"; };
@@ -707,6 +709,7 @@
 		8AD5ECE122E9BA39005CFAC9 /* Composer */ = {
 			isa = PBXGroup;
 			children = (
+				73E2EEF1233FA9CC00464B67 /* ComposerMessageLimit.swift */,
 				8AD5ECEA22E9BA39005CFAC9 /* ComposerView.swift */,
 				8AD5ECE522E9BA39005CFAC9 /* ComposerView+TextView.swift */,
 				8AD5ECE322E9BA39005CFAC9 /* ComposerView+Images.swift */,
@@ -1165,6 +1168,7 @@
 				8AD5ED7722E9BA98005CFAC9 /* ReadUsersView.swift in Sources */,
 				8AD5ED9222E9BA98005CFAC9 /* AttachmentPreview.swift in Sources */,
 				8AD5ED7B22E9BA98005CFAC9 /* ComposerCommandView.swift in Sources */,
+				73E2EEF2233FA9CC00464B67 /* ComposerMessageLimit.swift in Sources */,
 				8AD5EDBC22E9BA98005CFAC9 /* RxGesture+Extensions.swift in Sources */,
 				8AD5ED8C22E9BA98005CFAC9 /* AvatarView.swift in Sources */,
 				8AD5ED7522E9BA98005CFAC9 /* MessageTableViewCell+EnrichMessage.swift in Sources */,

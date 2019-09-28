@@ -18,6 +18,8 @@ public final class ComposerView: UIView {
     /// A composer view  style.
     public var style: ComposerViewStyle?
     
+    public var messageLimit: ComposerMessageLimit = .none
+    
     private var styleState: ComposerViewStyle.State = .disabled {
         didSet {
             if styleState != oldValue, let style = style {

@@ -106,4 +106,14 @@ extension ComposerView: UITextViewDelegate {
         updatePlaceholder()
         updateTextHeightIfNeeded()
     }
+    
+    public func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+        switch self.messageLimit {
+        case .limit(let count):
+            let newText = textView.text.replacingCharacters(in: range, with: text)
+            return newText.count <= count
+        default:
+            return true
+        }
+    }
 }
