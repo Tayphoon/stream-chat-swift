@@ -42,7 +42,7 @@ open class ChatViewController: ViewController, UITableViewDataSource, UITableVie
     public lazy var composerAddFileTypes = defaultComposerAddFileTypes
     
     /// Default attachments file types for thw composer view. This is useful for subclasses.
-    public var defaultComposerAddFileTypes: [ComposerAddFileType]  {
+    open var defaultComposerAddFileTypes: [ComposerAddFileType]  {
         return [.photo, .camera, .file]
     }
     
