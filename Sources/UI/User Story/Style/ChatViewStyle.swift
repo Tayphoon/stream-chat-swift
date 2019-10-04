@@ -20,10 +20,13 @@ public struct ChatViewStyle {
     /// An outgoing message view style.
     public var outgoingMessage: MessageViewStyle
     
+    /// The default chat view style.
+    public static let `default` = ChatViewStyle()
     /// A dark chat view style.
     public static let dark =
         ChatViewStyle(channel: ChannelViewStyle(backgroundColor: .chatSuperDarkGray,
-                                                nameColor: .white,
+                                                nameColor: .chatGray,
+                                                nameUnreadColor: .white,
                                                 messageUnreadColor: .white),
                       composer: ComposerViewStyle(textColor: .white,
                                                   helperContainerBackgroundColor: .chatDarkGray,

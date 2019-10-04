@@ -22,7 +22,7 @@ public final class ChannelTableViewCell: UITableViewCell, Reusable {
     }()
     
     /// A last message label.
-    private let messageLabel: UILabel = {
+    public let messageLabel: UILabel = {
         let label = UILabel(frame: .zero)
         label.font = .chatMedium
         return label
@@ -149,9 +149,13 @@ public final class ChannelTableViewCell: UITableViewCell, Reusable {
         }
         
         if isUnread {
+            nameLabel.font = style.nameUnreadFont
+            nameLabel.textColor = style.nameUnreadColor
             messageLabel.font = style.messageUnreadFont
             messageLabel.textColor = style.messageUnreadColor
         } else {
+            nameLabel.font = style.nameFont
+            nameLabel.textColor = style.nameColor
             messageLabel.font = style.messageFont
             messageLabel.textColor = style.messageColor
         }

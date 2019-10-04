@@ -25,20 +25,24 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
                               database: TestDatabase(),
                               logOptions: .all)
         
-        Client.shared.set(user: .user2, token: .token2)
+        setupUser()
         setupNotifications()
         
         return true
     }
     
+    func setupUser() {
+        Client.shared.set(user: .user2, token: .token2)
+    }
+    
     private func setupNotifications() {
         Notifications.shared.logsEnabled = true
         
-        Notifications.shared.openNewMessage = { [weak self] messageId, channelId in
+        Notifications.shared.showNewMessage = { [weak self] messageReference in
             if let tabBarController = self?.window?.rootViewController as? UITabBarController,
                 let navigationViewController = tabBarController.viewControllers?.first as? UINavigationController,
                 let channelsViewController = navigationViewController.viewControllers.first as? ChannelsViewController,
-                let channelIndex = channelsViewController.items.firstIndex(whereChannelId: channelId),
+                let channelIndex = channelsViewController.items.firstIndex(whereChannelId: messageReference.channelId),
                 let channelPresenter = channelsViewController.items[channelIndex].channelPresenter {
                 channelsViewController.navigationController?.viewControllers = [channelsViewController]
                 let chatViewController = channelsViewController.createChatViewController(with: channelPresenter,

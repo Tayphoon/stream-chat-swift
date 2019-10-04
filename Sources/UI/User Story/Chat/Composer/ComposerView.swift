@@ -75,16 +75,6 @@ public final class ComposerView: UIView {
     /// An editing state of the composer.
     public var isEditing: Bool = false
     
-    func attributedText(text: String = "", textColor: UIColor? = nil) -> NSAttributedString {
-        guard let style = style else {
-            return NSAttributedString(string: text)
-        }
-        
-        return NSAttributedString(string: text, attributes: [.foregroundColor: textColor ?? style.textColor,
-                                                             .font: style.font,
-                                                             .paragraphStyle: NSParagraphStyle.default])
-    }
-    
     /// A placeholder label.
     /// You have to use the `placeholderText` property to change the value of the placeholder label.
     public private(set) lazy var placeholderLabel: UILabel = {
@@ -122,7 +112,7 @@ public final class ComposerView: UIView {
     
     private var sendButtonWidthConstraint: Constraint?
     private var sendButtonRightConstraint: Constraint?
-
+    
     /// An attachment button.
     public private(set) lazy var attachmentButton: UIButton = {
         let button = UIButton(type: .custom)
@@ -149,15 +139,41 @@ public final class ComposerView: UIView {
         set { placeholderLabel.attributedText = attributedText(text: newValue, textColor: styleStateStyle?.tintColor) }
     }
     
-    // MARK: -
+    func attributedText(text: String = "", textColor: UIColor? = nil) -> NSAttributedString {
+        guard let style = style else {
+            return NSAttributedString(string: text)
+        }
+        
+        return NSAttributedString(string: text, attributes: [.foregroundColor: textColor ?? style.textColor,
+                                                             .font: style.font,
+                                                             .paragraphStyle: NSParagraphStyle.default])
+    }
     
-    
+    /// Toggle `isUserInteractionEnabled` states for all child views.
+    public var isEnabled: Bool = true {
+        didSet {
+            if let style = style {
+                sendButton.isEnabled = style.sendButtonVisibility == .whenActive ? isEnabled : false
+                sendButtonVisibilityBehaviorSubject.onNext((sendButton.isHidden, sendButton.isEnabled))
+            }
+            
+            attachmentButton.isEnabled = isEnabled
+            imagesCollectionView.isUserInteractionEnabled = isEnabled
+            imagesCollectionView.alpha = isEnabled ? 1 : 0.5
+            styleState = isEnabled ? .normal : .disabled
+        }
+    }
+}
+
+// MARK: - Add to Superview
+
+public extension ComposerView {
     /// Add the composer to a view.
     ///
     /// - Parameters:
     ///   - view: a superview.
     ///   - placeholderText: a placeholder text.
-    public func addToSuperview(_ view: UIView, placeholderText: String = "Write a message") {
+    func addToSuperview(_ view: UIView, placeholderText: String = "Write a message") {
         guard let style = style else {
             return
         }
@@ -273,7 +289,7 @@ public final class ComposerView: UIView {
     }
     
     /// Reset states of all child views and clear all added/generated data.
-    public func reset() {
+    func reset() {
         isEnabled = true
         isEditing = false
         previousTextBeforeReset = textView.attributedText
@@ -287,28 +303,13 @@ public final class ComposerView: UIView {
         styleState = textView.isFirstResponder ? .active : .normal
     }
     
-    /// Toggle `isUserInteractionEnabled` states for all child views.
-    public var isEnabled: Bool = true {
-        didSet {
-            if let style = style {
-                sendButton.isEnabled = style.sendButtonVisibility == .whenActive ? isEnabled : false
-                sendButtonVisibilityBehaviorSubject.onNext((sendButton.isHidden, sendButton.isEnabled))
-            }
-            
-            attachmentButton.isEnabled = isEnabled
-            imagesCollectionView.isUserInteractionEnabled = isEnabled
-            imagesCollectionView.alpha = isEnabled ? 1 : 0.5
-            styleState = isEnabled ? .normal : .disabled
-        }
-    }
-    
     /// Update the placeholder and send button visibility.
-    public func updatePlaceholder() {
+    func updatePlaceholder() {
         placeholderLabel.isHidden = textView.attributedText.length != 0
         DispatchQueue.main.async { [weak self] in self?.updateSendButton() }
     }
     
-    func updateSendButton() {
+    internal func updateSendButton() {
         let isAnyFileUploaded = uploader?.items.first(where: { $0.attachment != nil }) != nil
         
         if let style = style {
@@ -324,7 +325,7 @@ public final class ComposerView: UIView {
         }
     }
     
-    func updateStyleState() {
+    internal func updateStyleState() {
         styleState = !textView.isFirstResponder
             && imageUploaderItems.isEmpty
             && isUploaderFilesEmpty
@@ -332,30 +333,10 @@ public final class ComposerView: UIView {
     }
 }
 
-extension ComposerView {
-    
-    private func addBlurredBackground(blurEffectStyle: UIBlurEffect.Style) {
-        let isDark = blurEffectStyle == .dark
-        
-        guard !UIAccessibility.isReduceTransparencyEnabled else {
-            backgroundColor = isDark ? .chatDarkGray : .chatComposer
-            return
-        }
-        
-        let blurEffect = UIBlurEffect(style: blurEffectStyle)
-        let blurView = UIVisualEffectView(effect: blurEffect)
-        blurView.isUserInteractionEnabled = false
-        insertSubview(blurView, at: 0)
-        blurView.makeEdgesEqualToSuperview()
-        
-        let adjustingView = UIView(frame: .zero)
-        adjustingView.isUserInteractionEnabled = false
-        adjustingView.backgroundColor = .init(white: isDark ? 1 : 0, alpha: isDark ? 0.25 : 0.1)
-        insertSubview(adjustingView, at: 0)
-        adjustingView.makeEdgesEqualToSuperview()
-    }
-    
-    private func updateBottomConstraint(with keyboardHeight: CGFloat) {
+// MARK: - Keyboard Events
+
+private extension ComposerView {
+    func updateBottomConstraint(with keyboardHeight: CGFloat) {
         let bottom: CGFloat = (style?.edgeInsets.bottom ?? 0)
             + max(0, keyboardHeight - (keyboardHeight > 0 ? .safeAreaBottom + toolBar.frame.height : 0))
         
@@ -373,7 +354,7 @@ extension ComposerView {
     }
 }
 
-// MARK: - Setup Send Button
+// MARK: - Send Button Customization
 
 extension ComposerView {
     
@@ -401,5 +382,30 @@ extension ComposerView {
         sendButtonWidthConstraint?.deactivate()
         sendButtonWidthConstraint = nil
         sendButtonRightConstraint?.update(offset: -rightEdgeOffset)
+    }
+}
+
+// MARK: - Blurred Background
+
+private extension ComposerView {
+    func addBlurredBackground(blurEffectStyle: UIBlurEffect.Style) {
+        let isDark = blurEffectStyle == .dark
+        
+        guard !UIAccessibility.isReduceTransparencyEnabled else {
+            backgroundColor = isDark ? .chatDarkGray : .chatComposer
+            return
+        }
+        
+        let blurEffect = UIBlurEffect(style: blurEffectStyle)
+        let blurView = UIVisualEffectView(effect: blurEffect)
+        blurView.isUserInteractionEnabled = false
+        insertSubview(blurView, at: 0)
+        blurView.makeEdgesEqualToSuperview()
+        
+        let adjustingView = UIView(frame: .zero)
+        adjustingView.isUserInteractionEnabled = false
+        adjustingView.backgroundColor = .init(white: isDark ? 1 : 0, alpha: isDark ? 0.25 : 0.1)
+        insertSubview(adjustingView, at: 0)
+        adjustingView.makeEdgesEqualToSuperview()
     }
 }
