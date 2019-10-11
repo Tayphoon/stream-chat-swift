@@ -14,11 +14,9 @@ import RxSwift
 public extension Channel {
     
     /// Create a channel.
-    ///
-    /// - Parameter options: a query options for a new channel, e.g. watch channel events, presence of users.
     /// - Returns: an observable channel response.
-    func create(options: QueryOptions = .watch) -> Observable<ChannelResponse> {
-        return query(pagination: .messagesPageSize, options: options)
+    func create() -> Observable<ChannelResponse> {
+        return query(options: .watch)
     }
     
     /// Request for a channel data, e.g. messages, members, read states, etc
@@ -45,11 +43,37 @@ public extension Channel {
             })
     }
     
+    /// Stop watching the channel for events.
+    func stopWatching() -> Observable<Void> {
+        return Client.shared.rx.request(endpoint: .stopWatching(self))
+            .map { (_: EmptyData) in Void() }
+    }
+    
     /// Delete the channel.
     ///
     /// - Returns: an observable completion.
     func delete() -> Observable<ChannelDeletedResponse> {
         return Client.shared.rx.connectedRequest(endpoint: .deleteChannel(self))
+    }
+    
+    /// Hide the channel from queryChannels for the user until a message is added.
+    ///
+    /// - Parameter user: the current user.
+    func hide(for user: User? = User.current) -> Observable<Void> {
+        return Client.shared.rx.connectedRequest(endpoint: .hideChannel(self, user))
+            .flatMapLatest { (_: EmptyData) in self.stopWatching() }
+    }
+    
+    /// Removes the hidden status for a channel.
+    ///
+    /// - Parameter user: the current user.
+    func show(for user: User? = User.current) -> Observable<Void> {
+        guard let user = user else {
+            return .empty()
+        }
+        
+        return Client.shared.rx.connectedRequest(endpoint: .showChannel(self, user))
+            .map { (_: EmptyData) in Void() }
     }
     
     /// Send a new message or update with a given `message.id`.
@@ -65,7 +89,7 @@ public extension Channel {
         
         request = request
             .do(onNext: { _ in Client.shared.logger?.log("🎫", "Send Message Read. For a new message of the current user.") })
-            .flatMapLatest { [weak self] response in self?.markRead().map { _ in response } ?? .just(response) }
+            .flatMapLatest { response -> Observable<MessageResponse> in self.markRead().map { _ in response } }
         
         return Client.shared.connectedRequest(request)
     }
@@ -85,6 +109,10 @@ public extension Channel {
     ///
     /// - Returns: an observable event response.
     func markRead() -> Observable<Event> {
+        guard config.readEventsEnabled else {
+            return .empty()
+        }
+        
         let request: Observable<EventResponse> = Client.shared.rx.request(endpoint: .markRead(self))
         return Client.shared.connectedRequest(request.map({ $0.event }))
     }

@@ -23,7 +23,7 @@ public final class Client {
     let baseURL: BaseURL
     let stayConnectedInBackground: Bool
     
-    /// A databse for an offline mode.
+    /// A database for an offline mode.
     public let database: Database?
     
     var token: Token? {
@@ -45,6 +45,8 @@ public final class Client {
     public let logger: ClientLogger?
     /// The current user.
     public var user: User?
+    
+    var unreadCountAtomic = Atomic<UnreadCount>((0, 0))
     
     /// An observable client web socket connection.
     /// 
@@ -116,6 +118,7 @@ public final class Client {
         
         if logOptions == .all || logOptions == .requests || logOptions == .requestsHeaders {
             logger = ClientLogger(icon: "🐴", options: logOptions)
+            DispatchQueue.main.async { self.logger?.log("🕸", "Base URL: \(baseURL)") }
         } else {
             logger = nil
         }
@@ -131,7 +134,7 @@ public final class Client {
             return
         }
         
-        logger?.log("Reset Client User, Token, URLSession and WebSocket.")
+        logger?.log("🧹", "Reset Client User, Token, URLSession and WebSocket.")
         user = nil
         urlSession = setupURLSession(token: "")
         webSocket = WebSocket()

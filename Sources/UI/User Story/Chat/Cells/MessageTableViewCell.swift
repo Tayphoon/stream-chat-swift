@@ -21,7 +21,8 @@ public final class MessageTableViewCell: UITableViewCell, Reusable {
     
     // MARK: - Properties
     
-    private(set) var disposeBag = DisposeBag()
+    /// A dispose bag for the cell.
+    public private(set) var disposeBag = DisposeBag()
     
     public let avatarView = AvatarView(cornerRadius: .messageAvatarRadius)
     

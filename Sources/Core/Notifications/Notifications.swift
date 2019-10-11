@@ -14,12 +14,13 @@ import RxAppState
 /// A notifications manager.
 public final class Notifications: NSObject {
     enum NotificationUserInfoKeys: String {
-        case channelId
-        case messageId
+        case channelId = "channel_id"
+        case channelType = "channel_type"
+        case messageId = "message_id"
     }
     
     /// A message reference: channel id + message id.
-    public typealias MessageReference = (channelId: String, messageId: String)
+    public typealias MessageReference = (channelId: String, channelType: ChannelType, messageId: String)
     
     /// A callback type to open a chat view controller with a given message reference.
     public typealias ShowNewMessageCallback = (MessageReference) -> Void
@@ -134,8 +135,9 @@ extension Notifications {
         content.sound = UNNotificationSound.default
         content.badge = (UIApplication.shared.applicationIconBadgeNumber + 1) as NSNumber
         
-        content.userInfo = [NotificationUserInfoKeys.messageId.rawValue: message.id,
-                            NotificationUserInfoKeys.channelId.rawValue: channel.id]
+        content.userInfo = [NotificationUserInfoKeys.channelId.rawValue: channel.id,
+                            NotificationUserInfoKeys.channelType.rawValue: channel.type,
+                            NotificationUserInfoKeys.messageId.rawValue: message.id]
         
         // TODO: Add attchament image or video. The url should refer to a file.
         //  1. Download image.
@@ -173,13 +175,16 @@ extension Notifications: UNUserNotificationCenterDelegate {
     ///
     /// - Parameter response: a message reference (see `MessageReference`).
     public static func parseMessageReference(notificationResponse response: UNNotificationResponse) -> MessageReference? {
-        guard let userInfo = response.notification.request.content.userInfo as? [String: String],
-            let messageId = userInfo[NotificationUserInfoKeys.messageId.rawValue],
-            let chanellId = userInfo[NotificationUserInfoKeys.channelId.rawValue] else {
+        let userInfo = response.notification.request.content.userInfo
+        
+        guard let channelId = userInfo[NotificationUserInfoKeys.channelId.rawValue] as? String,
+            let channelTypeString = userInfo[NotificationUserInfoKeys.channelType.rawValue] as? String,
+            let messageId = userInfo[NotificationUserInfoKeys.messageId.rawValue] as? String,
+            let channelType = ChannelType(rawValue: channelTypeString) else {
                 return nil
         }
         
-        return (chanellId, messageId)
+        return (channelId, channelType, messageId)
     }
 }
 
