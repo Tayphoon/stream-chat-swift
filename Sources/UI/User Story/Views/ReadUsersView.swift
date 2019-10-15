@@ -16,7 +16,7 @@ public final class ReadUsersView: UIView {
     public let leftAvatarView = AvatarView(cornerRadius: .messageReadUsersAvatarCornerRadius)
     let countLabel = UILabel(frame: .zero)
     
-    override var backgroundColor: UIColor? {
+    override public var backgroundColor: UIColor? {
         didSet {
             rightAvatarView.layer.borderColor = backgroundColor?.cgColor
             leftAvatarView.layer.borderColor = backgroundColor?.cgColor
