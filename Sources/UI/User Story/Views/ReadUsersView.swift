@@ -10,10 +10,10 @@ import UIKit
 import StreamChatCore
 import SnapKit
 
-final class ReadUsersView: UIView {
+public final class ReadUsersView: UIView {
     
-    private let rightAvatarView = AvatarView(cornerRadius: .messageReadUsersAvatarCornerRadius)
-    private let leftAvatarView = AvatarView(cornerRadius: .messageReadUsersAvatarCornerRadius)
+    public let rightAvatarView = AvatarView(cornerRadius: .messageReadUsersAvatarCornerRadius)
+    public let leftAvatarView = AvatarView(cornerRadius: .messageReadUsersAvatarCornerRadius)
     let countLabel = UILabel(frame: .zero)
     
     override var backgroundColor: UIColor? {

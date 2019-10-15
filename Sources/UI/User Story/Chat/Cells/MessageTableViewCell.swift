@@ -71,7 +71,7 @@ public final class MessageTableViewCell: UITableViewCell, Reusable {
     
     let replyCountButton = UIButton(type: .custom)
     
-    let readUsersView = ReadUsersView()
+    public let readUsersView = ReadUsersView()
     var readUsersRightConstraint: Constraint?
     var readUsersBottomConstraint: Constraint?
     
