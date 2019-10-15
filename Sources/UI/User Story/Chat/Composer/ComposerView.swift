@@ -345,6 +345,12 @@ private extension ComposerView {
         if keyboardHeight == 0 {
             textView.resignFirstResponder()
         }
+        
+        DispatchQueue.main.async {
+            if self.styleState != .disabled, self.textView.isFirstResponder {
+                self.updateStyleState()
+            }
+        }
     }
 }
 
