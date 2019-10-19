@@ -93,39 +93,9 @@ open class ChatViewController: ViewController, UITableViewDataSource, UITableVie
         setupComposerView()
         updateTitle()
         
-<<<<<<< HEAD
         if let presenter = channelPresenter {
             configure(with: presenter)
         }
-        
-=======
-        guard let presenter = channelPresenter else {
-            return
-        }
-        
-        composerView.uploader = presenter.uploader
-        
-        presenter.changes
-            .filter { [weak self] _ in
-                if let self = self {
-                    self.needsToReload = self.needsToReload || !self.isVisible
-                    return self.changesEnabled && self.isVisible
-                }
-                
-                return false
-            }
-            .drive(onNext: { [weak self] in self?.updateTableView(with: $0) })
-            .disposed(by: disposeBag)
-        
-        if presenter.isEmpty {
-            channelPresenter?.reload()
-        } else {
-            refreshTableView(scrollToBottom: true, animated: false)
-        }
-        
-        needsToReload = false
-        changesEnabled = true
->>>>>>> master
         setupFooterUpdates()
     }
     
@@ -230,7 +200,7 @@ open class ChatViewController: ViewController, UITableViewDataSource, UITableVie
         presenter.changes
             .filter { [weak self] _ in
                 if let self = self {
-                    self.isItemsValid = self.isItemsValid && self.isVisible
+                    self.needsToReload = self.needsToReload || !self.isVisible
                     return self.changesEnabled && self.isVisible
                 }
                 
@@ -245,7 +215,7 @@ open class ChatViewController: ViewController, UITableViewDataSource, UITableVie
             refreshTableView(scrollToBottom: true, animated: false)
         }
         
-        isItemsValid = true
+        needsToReload = false
         changesEnabled = true
     }
 }
