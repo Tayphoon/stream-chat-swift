@@ -10,9 +10,12 @@ import UIKit
 import RxSwift
 import RxCocoa
 import StreamChatCore
+import StreamChat
 
 final class RootViewController: UIViewController {
     
+    @IBOutlet weak var splitViewButton: UIButton!
+    @IBOutlet weak var splitViewSeparator: UIView!
     @IBOutlet weak var totalUnreadCountLabel: UILabel!
     @IBOutlet weak var totalUnreadCountSwitch: UISwitch!
     @IBOutlet weak var badgeLabel: UILabel!
@@ -30,6 +33,8 @@ final class RootViewController: UIViewController {
     
     override func viewDidLoad() {
         super.viewDidLoad()
+        splitViewButton.isHidden = UIDevice.current.userInterfaceIdiom == .phone
+        splitViewSeparator.isHidden = UIDevice.current.userInterfaceIdiom == .phone
         setupNotifications()
         navigationController?.navigationBar.prefersLargeTitles = true
         
@@ -81,6 +86,11 @@ final class RootViewController: UIViewController {
     
     func subscribeForTotalUnreadCount() {
         Client.shared.unreadCount
+            .do(onNext: { _ in
+                if let currentUser = User.current, currentUser.isBanned {
+                    Banners.shared.show("You are banned")
+                }
+            })
             .drive(onNext: { [weak self] unreadCount in
                 self?.totalUnreadCountLabel.text = "Unread channels \(unreadCount.0), messages: \(unreadCount.1)"
                 UIApplication.shared.applicationIconBadgeNumber = unreadCount.messages

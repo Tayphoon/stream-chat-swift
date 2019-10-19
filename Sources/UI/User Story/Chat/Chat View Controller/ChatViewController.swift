@@ -27,7 +27,7 @@ open class ChatViewController: ViewController, UITableViewDataSource, UITableVie
     public let disposeBag = DisposeBag()
     /// A list of table view items, e.g. messages.
     public private(set) var items = [ChatItem]()
-    private var isItemsValid = false
+    private var needsToReload = true
     /// A reaction view.
     weak var reactionsView: ReactionsView?
     
@@ -93,19 +93,48 @@ open class ChatViewController: ViewController, UITableViewDataSource, UITableVie
         setupComposerView()
         updateTitle()
         
+<<<<<<< HEAD
         if let presenter = channelPresenter {
             configure(with: presenter)
         }
         
+=======
+        guard let presenter = channelPresenter else {
+            return
+        }
+        
+        composerView.uploader = presenter.uploader
+        
+        presenter.changes
+            .filter { [weak self] _ in
+                if let self = self {
+                    self.needsToReload = self.needsToReload || !self.isVisible
+                    return self.changesEnabled && self.isVisible
+                }
+                
+                return false
+            }
+            .drive(onNext: { [weak self] in self?.updateTableView(with: $0) })
+            .disposed(by: disposeBag)
+        
+        if presenter.isEmpty {
+            channelPresenter?.reload()
+        } else {
+            refreshTableView(scrollToBottom: true, animated: false)
+        }
+        
+        needsToReload = false
+        changesEnabled = true
+>>>>>>> master
         setupFooterUpdates()
     }
     
-    open override func viewWillAppear(_ animated: Bool) {
-        super.viewWillAppear(animated)
+    open override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
         startGifsAnimations()
         markReadIfPossible()
         
-        if let presenter = channelPresenter, (!isItemsValid || presenter.items != items) {
+        if let presenter = channelPresenter, (needsToReload || presenter.items != items) {
             let scrollToBottom = items.isEmpty || (scrollEnabled && tableView.bottomContentOffset < .chatBottomThreshold)
             refreshTableView(scrollToBottom: scrollToBottom, animated: false)
         }
@@ -130,7 +159,7 @@ open class ChatViewController: ViewController, UITableViewDataSource, UITableVie
             return
         }
         
-        isItemsValid = true
+        needsToReload = false
         items = presenter.items
         tableView.reloadData()
         

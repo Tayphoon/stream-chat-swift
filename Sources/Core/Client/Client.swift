@@ -31,6 +31,9 @@ public final class Client {
     }
     
     let tokenSubject = BehaviorSubject<Token?>(value: nil)
+    var tokenProvider: TokenProvider?
+    var expiredTokenDisposeBag = DisposeBag()
+    var isExpiredTokenInProgress = false
     
     /// A web socket client.
     public internal(set) lazy var webSocket = WebSocket()
@@ -43,8 +46,15 @@ public final class Client {
     
     /// A log manager.
     public let logger: ClientLogger?
+    
+    /// An observable user.
+    public internal(set) lazy var userDidUpdate: Observable<User?> = userPublishSubject.share(replay: 1)
+    private let userPublishSubject = PublishSubject<User?>()
+    
     /// The current user.
-    public var user: User?
+    public internal(set) var user: User? {
+        didSet { userPublishSubject.onNext(user) }
+    }
     
     var unreadCountAtomic = Atomic<UnreadCount>((0, 0))
     

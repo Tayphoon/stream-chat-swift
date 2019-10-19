@@ -32,6 +32,8 @@ public enum ClientError: LocalizedError {
     case encodingFailure(_ error: Error, object: Encodable)
     /// A decoding failed with an error.
     case decodingFailure(_ error: Error)
+    /// A message with the error type.
+    case errorMessage(Message)
     
     /// Internal error.
     public var error: Error? {
@@ -79,12 +81,16 @@ public enum ClientError: LocalizedError {
             return "A encoding failed: \(error) for object: \(object)"
         case .decodingFailure(let error):
             return "A decoding failed: \(error)"
+        case .errorMessage(let message):
+            return message.text
         }
     }
 }
 
 /// A parsed server response error.
 public struct ClientErrorResponse: LocalizedError, Decodable {
+    static let tokenExpiredErrorCode = 40
+    
     private enum CodingKeys: String, CodingKey {
         case code
         case message

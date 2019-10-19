@@ -121,6 +121,11 @@ extension ChatViewController {
         
         channelPresenter?.send(text: text)
             .subscribe(
+                onNext: { [weak self] messageResponse in
+                    if messageResponse.message.type == .error {
+                        self?.show(error: ClientError.errorMessage(messageResponse.message))
+                    }
+                },
                 onError: { [weak self] in
                     self?.composerView.reset()
                     self?.show(error: $0)
@@ -278,7 +283,7 @@ extension ChatViewController {
     ///
     /// - Returns: a container helper view.
     open func createComposerAddFileContainerView(title: String) -> ComposerHelperContainerView? {
-        guard !composerAddFileTypes.isEmpty else {
+        guard let presenter = channelPresenter, presenter.channel.config.uploadsEnabled, !composerAddFileTypes.isEmpty else {
             return nil
         }
         
@@ -366,6 +371,10 @@ extension ChatViewController {
         if subviews.count == 1, let first = subviews.first as? ComposerAddFileView {
             first.tap()
         } else {
+            if composerView.textView.frame.height > (.composerMaxHeight / 2) {
+                composerView.textView.resignFirstResponder()
+            }
+            
             composerAddFileContainerView.animate(show: true)
             
             if composerEditingContainerView.isHidden == false {

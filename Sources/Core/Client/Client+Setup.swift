@@ -52,10 +52,30 @@ extension Client {
     /// - Parameters:
     ///   - user: the current user (see `User`).
     ///   - tokenProvider: a token provider.
-    public func set(user: User, _ tokenProvider: TokenProvider) {
+    public func set(user: User, _ tokenProvider: @escaping TokenProvider) {
         disconnect()
         self.user = user
-        tokenProvider { self.setup(token: $0) }
+        self.tokenProvider = tokenProvider
+        touchTokenProvider()
+    }
+    
+    @discardableResult
+    func touchTokenProvider() -> Bool {
+        if let tokenProvider = tokenProvider {
+            expiredTokenDisposeBag = DisposeBag()
+            token = nil
+            isExpiredTokenInProgress = true
+            
+            if webSocket.isConnected {
+                webSocket.disconnect()
+            }
+            
+            logger?.log("🀄️", "Request for a new token from a token provider.")
+            tokenProvider { [weak self] in self?.setup(token: $0) }
+            return true
+        }
+        
+        return false
     }
     
     private func setup(token: Token) {
@@ -156,17 +176,18 @@ extension Client {
             ? .just(true)
             : InternetConnection.shared.isAvailableObservable
         
-        let webSocketResponse = tokenSubject.asObserver().map { $0?.isValid ?? false }
+        let webSocketResponse = tokenSubject.asObserver()
             .distinctUntilChanged()
+            .map { $0?.isValid ?? false }
             .observeOn(MainScheduler.instance)
-            .flatMapLatest { [unowned self] isTokenValid -> Observable<WebSocketEvent> in
+            .flatMapLatest({ [unowned self] isTokenValid -> Observable<WebSocketEvent> in
                 if isTokenValid {
                     self.webSocket.connect()
                     return self.webSocket.webSocket.rx.response
                 }
                 
                 return .just(.disconnected(nil))
-            }
+            })
             .do(onDispose: { [unowned self] in self.webSocket.disconnect() })
         
         return Observable.combineLatest(appState, internetIsAvailable, webSocketResponse)
@@ -176,6 +197,7 @@ extension Client {
             .do(onNext: { [unowned self] in
                 if case .connected(_, let user) = $0 {
                     self.user = user
+                    self.isExpiredTokenInProgress = false
                 }
             })
             .share(replay: 1)
