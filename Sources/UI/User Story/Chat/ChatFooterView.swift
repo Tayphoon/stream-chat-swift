@@ -9,14 +9,14 @@
 import UIKit
 import SnapKit
 
-final class ChatFooterView: UIView {
+public final class ChatFooterView: UIView {
     typealias TimerCompletion = () -> Void
     
     private var timerWorker: DispatchWorkItem?
     private var timerCompletion: TimerCompletion?
     private var timeout: TimeInterval = 0
     
-    private(set) lazy var avatarView: AvatarView = {
+    public lazy var avatarView: AvatarView = {
         let avatarView = AvatarView(cornerRadius: .chatFooterAvatarRadius)
         addSubview(avatarView)
         
@@ -38,7 +38,7 @@ final class ChatFooterView: UIView {
         return activityIndicator
     }()
     
-    private(set) lazy var textLabel: UILabel = {
+    public lazy var textLabel: UILabel = {
         let label = UILabel(frame: .zero)
         label.font = UIFont.chatMedium
         label.textColor = .chatGray
