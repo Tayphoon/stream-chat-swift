@@ -46,9 +46,9 @@ open class ChatViewController: ViewController, UITableViewDataSource, UITableVie
         return [.photo, .camera, .file]
     }
     
-    private(set) lazy var composerEditingContainerView = createComposerEditingContainerView()
-    private(set) lazy var composerCommandsContainerView = createComposerCommandsContainerView()
-    private(set) lazy var composerAddFileContainerView = createComposerAddFileContainerView(title: "Add a file")
+    public lazy var composerEditingContainerView = createComposerEditingContainerView()
+    public lazy var composerCommandsContainerView = createComposerCommandsContainerView()
+    public lazy var composerAddFileContainerView = createComposerAddFileContainerView(title: "Add a file")
     
     /// A table view of messages.
     public private(set) lazy var tableView: TableView = {
