@@ -300,7 +300,7 @@ extension ChatViewController {
                     UIImagePickerController.isSourceTypeAvailable(.savedPhotosAlbum) {
                     addButtonToAddFileView(container,
                                            icon: UIImage.Icons.images,
-                                           title: "Upload a photo or video",
+                                           title: "Upload a photo",
                                            sourceType: .photo(.savedPhotosAlbum)) { [weak self] in
                                             self?.showImagePicker(composerAddFileViewSourceType: $0)
                     }
