@@ -9,14 +9,14 @@
 import Foundation
 import RxSwift
 
-// MARK: - Requests
+// MARK: Channel Requests
 
 public extension Channel {
     
     /// Create a channel.
     /// - Returns: an observable channel response.
     func create() -> Observable<ChannelResponse> {
-        return query(options: .watch)
+        return query()
     }
     
     /// Request for a channel data, e.g. messages, members, read states, etc
@@ -31,41 +31,38 @@ public extension Channel {
         }
         
         let channelQuery = ChannelQuery(channel: self, members: members, pagination: pagination, options: options)
-        
-        return Client.shared.rx.connectedRequest(endpoint: .channel(channelQuery))
-            .do(onNext: { channelResponse in
-                if options.contains(.state) {
-                    if let database = Client.shared.database {
-                        database.add(messages: channelResponse.messages, for: channelResponse.channel)
-                        database.set(members: channelResponse.members, for: channelResponse.channel)
-                    }
-                }
-            })
+        return Client.shared.channel(query: channelQuery)
     }
     
-    /// Stop watching the channel for events.
+    /// Loads the initial channel state and watches for changes.
+    /// - Parameter options: an additional channel options, e.g. `.presence`
+    /// - Returns: an observable channel response.
+    func watch(options: QueryOptions = []) -> Observable<ChannelResponse> {
+        var options = options
+        
+        if !options.contains(.watch) {
+            options = options.union(.watch)
+        }
+        
+        return query(options: .watch)
+    }
+    
+    /// Stop watching the channel for a state changes.
     func stopWatching() -> Observable<Void> {
         return Client.shared.rx.request(endpoint: .stopWatching(self))
             .map { (_: EmptyData) in Void() }
     }
     
-    /// Delete the channel.
-    ///
-    /// - Returns: an observable completion.
-    func delete() -> Observable<ChannelDeletedResponse> {
-        return Client.shared.rx.connectedRequest(endpoint: .deleteChannel(self))
-    }
-    
     /// Hide the channel from queryChannels for the user until a message is added.
-    ///
-    /// - Parameter user: the current user.
-    func hide(for user: User? = User.current) -> Observable<Void> {
-        return Client.shared.rx.connectedRequest(endpoint: .hideChannel(self, user))
+    /// - Parameters:
+    ///   - user: the current user.
+    ///   - clearHistory: checks if needs to remove a message history of the channel.
+    func hide(for user: User? = User.current, clearHistory: Bool = false) -> Observable<Void> {
+        return Client.shared.rx.connectedRequest(endpoint: .hideChannel(self, user, clearHistory))
             .flatMapLatest { (_: EmptyData) in self.stopWatching() }
     }
     
     /// Removes the hidden status for a channel.
-    ///
     /// - Parameter user: the current user.
     func show(for user: User? = User.current) -> Observable<Void> {
         guard let user = user else {
@@ -76,8 +73,48 @@ public extension Channel {
             .map { (_: EmptyData) in Void() }
     }
     
-    /// Send a new message or update with a given `message.id`.
+    /// Update channel data.
+    /// - Parameter name: a channel name.
+    /// - Parameter imageURL: an image URL.
+    /// - Parameter extraData: a custom extra data.
+    func update(name: String? = nil, imageURL: URL? = nil, extraData: Codable? = nil) -> Observable<ChannelResponse> {
+        var changed = false
+        
+        if let name = name, !name.isEmpty {
+            changed = true
+            self.name = name
+        }
+        
+        if let imageURL = imageURL {
+            changed = true
+            self.imageURL = imageURL
+        }
+        
+        if let extraData = extraData {
+            changed = true
+            self.extraData = ExtraData(extraData)
+        }
+        
+        guard changed else {
+            return .empty()
+        }
+        
+        return Client.shared.rx.connectedRequest(endpoint: .updateChannel(.init(data: .init(self))))
+    }
+    
+    /// Delete the channel.
     ///
+    /// - Returns: an observable completion.
+    func delete() -> Observable<ChannelDeletedResponse> {
+        return Client.shared.rx.connectedRequest(endpoint: .deleteChannel(self))
+    }
+}
+    
+// MARK: - Message
+
+public extension Channel {
+    
+    /// Send a new message or update with a given `message.id`.
     /// - Parameter message: a message.
     /// - Returns: a created/updated message response.
     func send(message: Message) -> Observable<MessageResponse> {
@@ -88,8 +125,7 @@ public extension Channel {
         }
         
         request = request
-            .do(onNext: { _ in Client.shared.logger?.log("🎫", "Send Message Read. For a new message of the current user.") })
-            .flatMapLatest({ response -> Observable<MessageResponse> in
+            .flatMapLatest({ [weak self] response -> Observable<MessageResponse> in
                 if response.message.isBan {
                     if let currentUser = User.current, !currentUser.isBanned {
                         var user = currentUser
@@ -100,14 +136,21 @@ public extension Channel {
                     return .just(response)
                 }
                 
-                return self.markRead().map { _ in response }
+                guard let self = self else {
+                    return .empty()
+                }
+                
+                if self.config.readEventsEnabled {
+                    return self.markRead().map({ _ in response })
+                }
+                
+                return .just(response)
             })
         
         return Client.shared.connectedRequest(request)
     }
     
     /// Send a message action for a given ephemeral message.
-    ///
     /// - Parameters:
     ///   - action: an action, e.g. send, shuffle.
     ///   - ephemeralMessage: an ephemeral message.
@@ -125,6 +168,7 @@ public extension Channel {
             return .empty()
         }
         
+        Client.shared.logger?.log("🎫 Send Message Read. For a new message of the current user.")
         let request: Observable<EventResponse> = Client.shared.rx.request(endpoint: .markRead(self))
         return Client.shared.connectedRequest(request.map({ $0.event }))
     }
@@ -137,7 +181,80 @@ public extension Channel {
         let request: Observable<EventResponse> = Client.shared.rx.request(endpoint: .sendEvent(eventType, self))
         
         return Client.shared.connectedRequest(request.map({ $0.event })
-            .do(onNext: { _ in Client.shared.logger?.log("🎫", eventType.rawValue) }))
+            .do(onNext: { _ in Client.shared.logger?.log("🎫 \(eventType.rawValue)") }))
+    }
+}
+
+// MARK: - Members
+
+public extension Channel {
+    
+    /// Add a member to the channel.
+    /// - Parameter member: a member.
+    func add(_ member: Member) -> Observable<ChannelResponse> {
+        return add(Set([member]))
+    }
+    
+    /// Add members to the channel.
+    /// - Parameter members: members.
+    func add(_ members: Set<Member>) -> Observable<ChannelResponse> {
+        var members = members
+        
+        self.members.forEach { existsMember in
+            if let index = members.firstIndex(of: existsMember) {
+                members.remove(at: index)
+            }
+        }
+        
+        return members.isEmpty ? .empty() : Client.shared.connectedRequest(.addMembers(members, self))
+    }
+    
+    /// Remove a member from the channel.
+    /// - Parameter member: a member.
+    func remove(_ member: Member) -> Observable<ChannelResponse> {
+        return remove(Set([member]))
+    }
+    
+    /// Remove members from the channel.
+    /// - Parameter members: members.
+    func remove(_ members: Set<Member>) -> Observable<ChannelResponse> {
+        var existsMembers = Set<Member>()
+        
+        self.members.forEach { existsMember in
+            if members.firstIndex(of: existsMember) != nil {
+                existsMembers.insert(existsMember)
+            }
+        }
+        
+        return existsMembers.isEmpty ? .empty() : Client.shared.connectedRequest(.removeMembers(members, self))
+    }
+    
+    // MARK: User Ban
+    
+    /// Check is the user is banned for the channel.
+    /// - Parameter user: a user.
+    func isBanned(_ user: User) -> Bool {
+        return bannedUsers.contains(user)
+    }
+    
+    /// Ban a user.
+    /// - Parameter user: a user.
+    func ban(user: User, timeoutInMinutes: Int? = nil, reason: String? = nil) -> Observable<Void> {
+        if isBanned(user) || !banEnabling.isEnabled(for: self) {
+            return .empty()
+        }
+        
+        let timeoutInMinutes = timeoutInMinutes ?? banEnabling.timeoutInMinutes
+        let reason = reason ?? banEnabling.reason
+        let userBan = UserBan(user: user, channel: self, timeoutInMinutes: timeoutInMinutes, reason: reason)
+        let request: Observable<EmptyData> = Client.shared.connectedRequest(.ban(userBan))
+        
+        return request.map({ _ in Void() })
+            .do(onNext: { [weak self] in
+                if timeoutInMinutes == nil {
+                    self?.bannedUsers.append(user)
+                }
+            })
     }
 }
 
@@ -145,13 +262,28 @@ public extension Channel {
 
 public extension Channel {
     
-    /// Send invites to users.
-    ///
-    /// - Parameter userIds: a list of user Ids.
+    /// Invite a member to the channel.
+    /// - Parameter member: a member.
     /// - Returns: an observable channel response.
-    func sendInvites(to users: [User]) -> Observable<ChannelResponse> {
-        users.forEach { addInvitedUser($0) }    
-        return query()
+    func invite(_ member: Member) -> Observable<ChannelResponse> {
+        return invite([member])
+    }
+    
+    /// Invite members to the channel.
+    /// - Parameter members: a list of members.
+    /// - Returns: an observable channel response.
+    func invite(_ members: [Member]) -> Observable<ChannelResponse> {
+        var membersSet = Set<Member>()
+        
+        for member in members where !self.members.contains(member) {
+            membersSet.insert(member)
+        }
+        
+        guard !membersSet.isEmpty else {
+            return .empty()
+        }
+        
+        return Client.shared.rx.connectedRequest(endpoint: .invite(membersSet, self))
     }
     
     /// Accept an invite to the channel.
@@ -242,21 +374,25 @@ public extension Channel {
     /// Add a reaction to a message.
     ///
     /// - Parameters:
-    ///   - reactionType: a reaction type, e.g. like.
-    ///   - message: a message.
-    /// - Returns: an observable message response.
-    func addReaction(_ reactionType: ReactionType, to message: Message) -> Observable<MessageResponse> {
-        return message.addReaction(reactionType)
+    ///   - type: a reaction type.
+    ///   - score: a reaction score, e.g. `.cumulative` it could be more then 1.
+    ///   - extraData: a reaction extra data.
+    ///   - message: a message for the reacction.
+    func addReaction(type: ReactionType,
+                     score: Int = 1,
+                     extraData: Codable? = nil,
+                     to message: Message) -> Observable<MessageResponse> {
+        return message.addReaction(type: type, score: score, extraData: extraData)
     }
     
     /// Delete a reaction to the message.
     ///
     /// - Parameters:
-    ///     - reactionType: a reaction type, e.g. like.
+    ///     - type: a reaction type, e.g. like.
     ///     - message: a message.
     /// - Returns: an observable message response.
-    func deleteReaction(_ reactionType: ReactionType, from message: Message) -> Observable<MessageResponse> {
-        return message.deleteReaction(reactionType)
+    func deleteReaction(type: ReactionType, from message: Message) -> Observable<MessageResponse> {
+        return message.deleteReaction(type: type)
     }
     
     /// Send a request for reply messages.
@@ -314,4 +450,31 @@ public struct EventResponse: Decodable {
 public struct FileUploadResponse: Decodable {
     /// An uploaded file URL.
     public let file: URL
+}
+
+struct HiddenChannelRequest: Encodable {
+    private enum CodingKeys: String, CodingKey {
+        case userId = "user_id"
+        case clearHistory = "clear_history"
+    }
+    
+    let userId: String
+    let clearHistory: Bool
+}
+
+/// A hidden channel event response.
+public struct HiddenChannelResponse: Decodable, Equatable {
+    private enum CodingKeys: String, CodingKey {
+        case cid
+        case clearHistory = "clear_history"
+        /// A created date.
+        case created = "created_at"
+    }
+    
+    /// A channel type + id.
+    public let cid: ChannelId
+    /// The message history was cleared.
+    public let clearHistory: Bool
+    /// An event created date.
+    public let created: Date
 }

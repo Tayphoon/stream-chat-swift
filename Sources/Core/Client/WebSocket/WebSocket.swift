@@ -31,7 +31,7 @@ public final class WebSocket {
     private var lastMessageResponse: Response?
     
     private lazy var handshakeTimer = RepeatingTimer(timeInterval: .seconds(30), queue: webSocket.callbackQueue) { [weak self] in
-        self?.logger?.log("🏓")
+        self?.logger?.log("🏓", level: .info)
         self?.webSocket.write(ping: Data())
     }
     
@@ -43,9 +43,8 @@ public final class WebSocket {
     /// An observable event response.
     public private(set) lazy var response: Observable<WebSocket.Response> = Observable.just(())
         .observeOn(MainScheduler.instance)
-        .flatMapLatest { Client.shared.webSocket.webSocket.rx.response }
-        .map { [weak self] in self?.parseMessage($0) }
-        .unwrap()
+        .flatMapLatest { [weak self] in self?.webSocket.rx.response ?? .empty() }
+        .compactMap { [weak self] in self?.parseMessage($0) }
         .do(onNext: {
             if case .notificationMutesUpdated(let user, _) = $0.event {
                 Client.shared.user = user
@@ -74,25 +73,22 @@ public final class WebSocket {
         disconnect()
     }
     
-    func connectIfPossible() {
+    func connect() {
         guard InternetConnection.shared.isAvailable else {
             disconnectedNoInternet()
             return
         }
         
-        connect()
-    }
-    
-    func connect() {
         guard webSocketInitiated else {
             return
         }
         
         if webSocket.isConnected || isReconnecting {
+            logger?.log("Skip connecting: isConnected = \(webSocket.isConnected), isReconnecting = \(isReconnecting)")
            return
         }
         
-        logger?.log("❤️", "Connecting...")
+        logger?.log("❤️ Connecting...")
         logger?.log(webSocket.request)
         DispatchQueue.main.async(execute: webSocket.connect)
     }
@@ -118,7 +114,10 @@ public final class WebSocket {
             
             webSocket.callbackQueue.asyncAfter(deadline: .now() + WebSocket.maxBackgroundTime, execute: goingToDisconnect)
             self.goingToDisconnect = goingToDisconnect
-            ClientLogger.log("💜", "Background mode on")
+            
+            if Client.shared.logOptions.isEnabled {
+                ClientLogger.log("💜", "Background mode on")
+            }
         } else {
             disconnect()
         }
@@ -131,21 +130,28 @@ public final class WebSocket {
         if backgroundTask != .invalid {
             UIApplication.shared.endBackgroundTask(backgroundTask)
             backgroundTask = .invalid
-            ClientLogger.log("💜", "Background mode off")
+            
+            if Client.shared.logOptions.isEnabled {
+                ClientLogger.log("💜", "Background mode off")
+            }
         }
     }
     
     func disconnect() {
+        logger?.log("Disconnecting...")
+        
         guard webSocketInitiated else {
+            logger?.log("Skip disconnecting: WebSocket was not initiated")
             return
         }
         
-        lastConnectionId = nil
-        
         if webSocket.isConnected {
-            handshakeTimer.suspend()
-            webSocket.disconnect()
-            logger?.log("💔", "Disconnected deliberately")
+            // Server won't send Close control frame, we must force close the connection.
+            webSocket.disconnect(forceTimeout: 0)
+            clearStateAfterDisconnect()
+            logger?.log("💔 Disconnected deliberately")
+        } else {
+            logger?.log("Skip disconnecting: WebSocket was not connected")
         }
         
         DispatchQueue.main.async {
@@ -153,8 +159,13 @@ public final class WebSocket {
                 InternetConnection.shared.stopObserving()
             }
         }
-        
+    }
+    
+    func clearStateAfterDisconnect() {
+        handshakeTimer.suspend()
+        lastConnectionId = nil
         cancelBackgroundWork()
+        logger?.log("🔑 connectionId cleaned")
     }
 }
 
@@ -192,7 +203,7 @@ extension WebSocket {
                 lastConnectionId = connectionId
                 handshakeTimer.resume()
                 Client.shared.unreadCountAtomic.set((user.channelsUnreadCount, user.messagesUnreadCount))
-                logger?.log("🥰 Connected")
+                logger?.log("🥰 Connected with id: \(connectionId)")
                 return .connected(connectionId, user)
             } else if lastJSONError != nil {
                 return nil
@@ -229,25 +240,22 @@ extension WebSocket {
     }
     
     private func disconnectedNoInternet() {
-        logger?.log("💔🕸", "Skip connecting")
-        cancelBackgroundWork()
-        handshakeTimer.suspend()
-        lastConnectionId = nil
+        logger?.log("💔🕸 Disconnected: No Internet")
+        clearStateAfterDisconnect()
         consecutiveFailures = 0
     }
     
     private func disconnected(_ error: Error? = nil) -> Connection {
         logger?.log("💔🤔 Disconnected")
-        handshakeTimer.suspend()
         
         if let error = error {
-            var errorMessage = "💔😡 Disconnected by error"
+            var errorMessage = "🦄💔😡 Disconnected by error"
             
             if let lastJSONError = lastJSONError {
                 errorMessage += ": \(lastJSONError)"
             }
             
-            ClientLogger.log("🦄", error, message: errorMessage)
+            logger?.log(error, message: errorMessage)
             ClientLogger.showConnectionAlert(error, jsonError: lastJSONError)
             
             if !willReconnectAfterError(error) {
@@ -275,27 +283,40 @@ extension WebSocket {
         }
         
         guard let data = message.data(using: .utf8) else {
-            logger?.log("📦", "Can't get a data from the message: \(message)")
+            logger?.log("📦 Can't get a data from the message: \(message)", level: .error)
             lastMessageResponse = nil
             return nil
         }
         
-        logger?.log("📦", data)
         lastJSONError = nil
         
-        if let errorContainer = try? JSONDecoder.stream.decode(ErrorContainer.self, from: data) {
+        if let errorContainer = try? JSONDecoder.default.decode(ErrorContainer.self, from: data) {
             lastJSONError = errorContainer.error
             lastMessageResponse = nil
+            logger?.log(data, forceToShowData: true)
             return nil
         }
         
         do {
-            lastMessageResponse = try JSONDecoder.stream.decode(Response.self, from: data)
+            let lastMessageResponse = try JSONDecoder.default.decode(Response.self, from: data)
+            self.lastMessageResponse = lastMessageResponse
             lastMessageHashValue = message.hashValue
             consecutiveFailures = 0
+            
+            if case .healthCheck = lastMessageResponse.event.type {} else {
+                if let cid = lastMessageResponse.cid {
+                    logger?.log("\(lastMessageResponse.event.type) 🆔 \(cid)")
+                } else {
+                    logger?.log("\(lastMessageResponse.event.type)")
+                }
+            }
+            
+            logger?.log(data)
             return lastMessageResponse
+            
         } catch {
-            ClientLogger.log("🦄", error, message: "😡 Decode response")
+            logger?.log(data, forceToShowData: true)
+            logger?.log(error, message: "🦄😡 Decode response")
             lastMessageResponse = nil
             lastMessageHashValue = 0
         }
@@ -317,6 +338,6 @@ extension ObservableType where Element == WebSocket.Connection {
     public func connected(_ connectionStatusHandler: ConnectionStatusHandler? = nil) -> Observable<Void> {
         return self.do(onNext: { connectionStatusHandler?($0.isConnected) })
             .filter { $0.isConnected }
-            .map { _ in Void() }
+            .void()
     }
 }

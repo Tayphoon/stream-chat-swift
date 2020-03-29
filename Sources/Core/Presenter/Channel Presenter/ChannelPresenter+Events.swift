@@ -60,31 +60,47 @@ extension ChannelPresenter {
                 return .footerUpdated
             }
             
-        case .messageNew(let message, _, _, let messageNewChannel, _):
+        case .messageNew(let message, let unreadCount, _, let messageNewChannel, let type):
             guard shouldMessageEventBeHandled(message) else {
                 return .none
             }
             
-            if let messageNewChannel = messageNewChannel {
-                channelAtomic.set(messageNewChannel)
-            }
-            
-            if channel.config.readEventsEnabled, !message.user.isCurrent {
-                if let lastMessage = lastMessageAtomic.get() {
-                    unreadMessageReadAtomic.set(MessageRead(user: lastMessage.user, lastReadDate: lastMessage.updated))
+            // A new message event.
+            if case .messageNew = type {
+                if channel.config.readEventsEnabled, !message.user.isCurrent {
+                    channel.unreadCountAtomic += 1
+                    
+                    if let lastMessage = lastMessageAtomic.get() {
+                        unreadMessageReadAtomic.set(MessageRead(user: lastMessage.user, lastReadDate: lastMessage.updated))
+                    } else {
+                        unreadMessageReadAtomic.set(MessageRead(user: message.user, lastReadDate: message.updated))
+                    }
                 } else {
-                    unreadMessageReadAtomic.set(MessageRead(user: message.user, lastReadDate: message.updated))
+                    unreadMessageReadAtomic.set(nil)
                 }
             } else {
-                unreadMessageReadAtomic.set(nil)
+                // A notification new message event.
+                if let messageNewChannel = messageNewChannel {
+                    channelAtomic.set(messageNewChannel)
+                }
+                
+                channel.unreadCountAtomic.set(unreadCount)
+                
+                if unreadCount > 0, unreadMessageReadAtomic.get() == nil {
+                    unreadMessageReadAtomic.set(MessageRead(user: message.user, lastReadDate: message.updated))
+                }
             }
             
+            let newStatusAdded = addStatusIfNeeded(for: message)
             let nextRow = items.count
             let reloadRow: Int? = items.last?.message?.user == message.user ? nextRow - 1 : nil
             appendOrUpdateMessageItem(message)
-            let viewChanges = ViewChanges.itemAdded(nextRow, reloadRow, message.user.isCurrent, items)
+            let viewChanges = ViewChanges.itemsAdded(newStatusAdded ? [nextRow - 1, nextRow] : [nextRow],
+                                                     reloadRow,
+                                                     message.user.isCurrent,
+                                                     items)
             lastWebSocketEventViewChanges = viewChanges
-            Client.shared.database?.add(messages: [message], for: channel)
+            channel.add(messagesToDatabase: [message])
             Notifications.shared.showIfNeeded(newMessage: message, in: channel)
             
             return viewChanges
@@ -97,12 +113,14 @@ extension ChannelPresenter {
             
             if let index = items.lastIndex(whereMessageId: message.id) {
                 appendOrUpdateMessageItem(message, at: index)
-                let viewChanges = ViewChanges.itemUpdated([index], [message], items)
+                let viewChanges = ViewChanges.itemsUpdated([index], [message], items)
                 lastWebSocketEventViewChanges = viewChanges
                 return viewChanges
             }
             
-        case .reactionNew(let reaction, let message, _, _), .reactionDeleted(let reaction, let message, _, _):
+        case .reactionNew(let reaction, let message, _, _),
+             .reactionUpdated(let reaction, let message, _, _),
+             .reactionDeleted(let reaction, let message, _, _):
             guard shouldMessageEventBeHandled(message) else {
                 return .none
             }
@@ -112,23 +130,26 @@ extension ChannelPresenter {
                 
                 if reaction.isOwn, let currentMessage = items[index].message {
                     if case .reactionDeleted = event {
-                        message.deleteFromOwnReactions(reaction, reactions: currentMessage.ownReactions)
+                        message.delete(reaction: reaction, fromOwnReactions: currentMessage.ownReactions)
                     } else {
-                        message.addToOwnReactions(reaction, reactions: currentMessage.ownReactions)
+                        message.addOrUpdate(reaction: reaction, toOwnReactions: currentMessage.ownReactions)
                     }
                 }
                 
                 appendOrUpdateMessageItem(message, at: index)
-                let viewChanges = ViewChanges.itemUpdated([index], [message], items)
+                let viewChanges = ViewChanges.itemsUpdated([index], [message], items)
                 lastWebSocketEventViewChanges = viewChanges
                 return viewChanges
             }
             
         case .messageRead(let messageRead, _):
-            guard channel.config.readEventsEnabled,
-                let currentUser = User.current,
-                messageRead.user != currentUser,
-                let lastAddedOwnMessage = lastAddedOwnMessage,
+            guard channel.config.readEventsEnabled, let currentUser = User.current, messageRead.user != currentUser else {
+                return .none
+            }
+            
+            channel.unreadCountAtomic.set(0)
+            
+            guard  let lastAddedOwnMessage = lastAddedOwnMessage,
                 lastAddedOwnMessage.created <= messageRead.lastReadDate,
                 let lastOwnMessageIndex = items.lastIndex(whereMessageId: lastAddedOwnMessage.id) else {
                     return .none
@@ -162,13 +183,26 @@ extension ChannelPresenter {
                 messageReadsToMessageId[messageRead] = lastAddedOwnMessage.id
             }
             
-            return .itemUpdated(rows, messages, items)
+            return .itemsUpdated(rows, messages, items)
+            
+        case .channelUpdated(let response, _):
+            channelAtomic.set(response.channel)
             
         default:
             break
         }
         
         return .none
+    }
+    
+    private func addStatusIfNeeded(for newMessage: Message) -> Bool {
+        guard let lastMessage = items.last?.message else { return false }
+        guard newMessage.created.isToday, !lastMessage.created.isToday else { return false }
+        
+        items.append(.status(ChatItem.statusTodayTitle,
+                             "at \(DateFormatter.time.string(from: newMessage.created))",
+                             false))
+        return true
     }
     
     private func appendOrUpdateMessageItem(_ message: Message, at index: Int = -1) {

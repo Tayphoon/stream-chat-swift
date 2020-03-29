@@ -39,7 +39,7 @@ public final class Notifications: NSObject {
     public var showNewMessage: ShowNewMessageCallback?
     
     /// Enablde clearing application icon badge number when app become active.
-    public var clearApplicationIconBadgeNumberOnAppActive = false {
+    public var clearApplicationIconBadgeNumberOnAppActive = false { // swiftlint:disable:this identifier_name
         didSet {
             if clearApplicationIconBadgeNumberOnAppActive {
                 observeActiveAppStateForClearing()
@@ -51,15 +51,9 @@ public final class Notifications: NSObject {
     
     var logger: ClientLogger?
     
-    /// Enable logs for Notifications.
-    public var logsEnabled: Bool = false {
-        didSet {
-            logger = logsEnabled ? ClientLogger(icon: "🗞") : nil
-        }
-    }
-    
     override init() {
         super.init()
+        logger = Client.shared.logOptions.logger(icon: "🗞", for: [.notificationsError, .notifications])
         
         if UNUserNotificationCenter.current().delegate == nil {
             UNUserNotificationCenter.current().delegate = self
@@ -74,7 +68,7 @@ public final class Notifications: NSObject {
             if settings.authorizationStatus == .notDetermined {
                 self.askForPermissions()
             } else if settings.authorizationStatus == .denied {
-                self.logger?.log("❌ Notifications denied")
+                self.logger?.log("❌ Notifications denied", level: .error)
             } else {
                 self.registerForPushNotifications()
                 self.logger?.log("👍 Notifications authorized (\(settings.authorizationStatus.rawValue))")
@@ -90,9 +84,9 @@ public final class Notifications: NSObject {
                 self.registerForPushNotifications()
                 self.logger?.log("👍 User has accepted notifications")
             } else if let error = error {
-                self.logger?.log("❌ User has declined notifications \(error)")
+                self.logger?.log(error, message: "User has declined notifications")
             } else {
-                self.logger?.log("❌ User has declined notifications: unknown reason")
+                self.logger?.log("❌ User has declined notifications: unknown reason", level: .error)
             }
         }
     }
@@ -118,6 +112,7 @@ extension Notifications {
     public func showIfNeeded(newMessage message: Message, in channel: Channel) {
         DispatchQueue.main.async {
             if UIApplication.shared.appState == .background {
+                self.logger?.log("Show channel: \(channel.cid) message id: \(message.id) text: \(message.textOrArgs)")
                 self.show(newMessage: message, in: channel)
             }
         }
@@ -135,7 +130,13 @@ extension Notifications {
         
         let content = createLocalNotificationContent(newMessage: message, in: channel)
         let request = UNNotificationRequest(identifier: message.id, content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request)
+        logger?.log("Added a local notification for channel: \(channel.cid) message id: \(message.id) text: \(message.textOrArgs)")
+        
+        UNUserNotificationCenter.current().add(request) { [unowned self] error in
+            if let error = error {
+                self.logger?.log(error, message: "When adding a local notification")
+            }
+        }
     }
     
     private func createLocalNotificationContent(newMessage message: Message, in channel: Channel) -> UNNotificationContent {
@@ -203,12 +204,17 @@ extension Notifications: UNUserNotificationCenterDelegate {
     /// - Parameter response: a message reference (see `MessageReference`).
     public static func parseMessageReference(notificationResponse response: UNNotificationResponse) -> MessageReference? {
         let userInfo = response.notification.request.content.userInfo
-        
+
         guard let channelId = userInfo[NotificationUserInfoKeys.channelId.rawValue] as? String,
             let channelTypeString = userInfo[NotificationUserInfoKeys.channelType.rawValue] as? String,
-            let messageId = userInfo[NotificationUserInfoKeys.messageId.rawValue] as? String,
-            let channelType = ChannelType(rawValue: channelTypeString) else {
+            let messageId = userInfo[NotificationUserInfoKeys.messageId.rawValue] as? String else {
                 return nil
+        }
+        
+        let channelType = ChannelType(rawValue: channelTypeString)
+        
+        if case .unknown = channelType {
+            return nil
         }
         
         return (channelId, channelType, messageId)
@@ -225,7 +231,8 @@ extension Notifications {
             
             UIApplication.shared.rx.appState
                 .filter { $0 == .active }
-                .subscribe(onNext: { [weak self] _ in self?.clear() })
+                .skip(1)
+                .subscribe(onNext: { [unowned self] _ in self.clear() })
                 .disposed(by: self.disposeBag)
         }
     }
@@ -234,5 +241,6 @@ extension Notifications {
         UIApplication.shared.applicationIconBadgeNumber = 0
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
         UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
+        logger?.log("🧹 Notifications and the badge cleared")
     }
 }

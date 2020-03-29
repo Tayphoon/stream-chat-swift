@@ -7,16 +7,25 @@
 //
 
 import Foundation
+import UIKit
 
 extension Client {
-    /// A Stream Chat version.
-    public static let version: String = Bundle(for: Client.self).infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
     
     func setupURLSession(token: Token) -> URLSession {
+        let headers = authHeaders(token: token)
+        logger?.log(headers: headers)
         let config = URLSessionConfiguration.default
         config.waitsForConnectivity = true
-        
-        var headers = ["X-Stream-Client": "stream-chat-swift-client-\(Client.version)"]
+        config.httpAdditionalHeaders = headers
+        return URLSession(configuration: config, delegate: urlSessionTaskDelegate, delegateQueue: nil)
+    }
+    
+    func authHeaders(token: Token) -> [String: String] {
+        var headers = [
+            "X-Stream-Client": "stream-chat-swift-client-\(Environment.version)",
+            "X-Stream-Device": Environment.deviceModelName,
+            "X-Stream-OS": Environment.systemName,
+            "X-Stream-App-Environment": Environment.name]
         
         if token.isBlank {
             headers["Stream-Auth-Type"] = "anonymous"
@@ -25,9 +34,40 @@ extension Client {
             headers["Authorization"] = token
         }
         
-        config.httpAdditionalHeaders = headers
+        if let bundleId = Bundle.main.id {
+            headers["X-Stream-BundleId"] = bundleId
+        }
         
-        return URLSession(configuration: config, delegate: urlSessionTaskDelegate, delegateQueue: nil)
+        return headers
+    }
+    
+    func checkLatestVersion() {
+        // Check latest pod version and log warning if there's a new version
+        guard let podUrl = URL(string: "https://trunk.cocoapods.org/api/v1/pods/StreamChat") else { return }
+        
+        // swiftlint:disable nesting
+        struct PodTrunk: Codable {
+            struct Version: Codable {
+                let name: String
+            }
+            
+            let versions: [Version]
+        }
+        // swiftlint:enable nesting
+        
+        let versionTask = URLSession(configuration: .default).dataTask(with: podUrl) { data, _, error in
+            guard let data = data, error == nil else {
+                return
+            }
+            do {
+                let podTrunk = try JSONDecoder().decode(PodTrunk.self, from: data)
+                if let latestVersion = podTrunk.versions.last?.name, latestVersion > Environment.version {
+                    ClientLogger.logger("📢", "", "StreamChat \(latestVersion) is released (you are on \(Environment.version)). "
+                        + "It's recommended to update to the latest version.")
+                }
+            } catch {}
+        }
+        versionTask.resume()
     }
     
     /// Send a request.
@@ -39,20 +79,24 @@ extension Client {
     @discardableResult
     public func request<T: Decodable>(endpoint: Endpoint, _ completion: @escaping Completion<T>) -> URLSessionDataTask {
         if let logger = logger {
-            let endpointDescription = String(describing: endpoint).prefix(while: { $0 != "(" }).uppercased()
-            logger.timing("Prepare for request: \(endpointDescription)", reset: true)
-            logger.log(urlSession.configuration)
+            logger.log("Request: \(String(describing: endpoint).prefix(100))...", level: .debug)
         }
         
-        func retryRequestForExpiredToken() {
+        func retryRequestForExpiredToken(_ endpoint: Endpoint) {
+            logger?.log("🀄️ Token expired. The request added to the waiting list", level: .debug)
+            
             connection.connected()
                 .take(1)
-                .subscribe(onNext: { [unowned self] in self.request(endpoint: endpoint, completion) })
+                .subscribe(onNext: { [unowned self] in
+                    self.logger?.log("Retring the request when token was expired...", level: .debug)
+                    self.isExpiredTokenInProgress = false
+                    self.request(endpoint: endpoint, completion)
+                })
                 .disposed(by: expiredTokenDisposeBag)
         }
         
         if isExpiredTokenInProgress {
-            retryRequestForExpiredToken()
+            retryRequestForExpiredToken(endpoint)
             return URLSessionDataTask()
         }
         
@@ -64,17 +108,17 @@ extension Client {
             
             if endpoint.isUploading {
                 urlRequest = try encodeRequestForUpload(for: endpoint, url: url).get()
-                logger?.timing("Uploading...")
+                logger?.timing("Uploading...", reset: true)
             } else {
                 urlRequest = try encodeRequest(for: endpoint, url: url).get()
-                logger?.timing("Sending request...")
+                logger?.timing("Sending request...", reset: true)
             }
             
             task = urlSession.dataTask(with: urlRequest) { [unowned self] in
                 self.parse(data: $0, response: $1, error: $2, completion: completion)
                 
                 if self.isExpiredTokenInProgress {
-                    retryRequestForExpiredToken()
+                    retryRequestForExpiredToken(endpoint)
                 }
             }
             
@@ -86,7 +130,7 @@ extension Client {
         } catch let error as ClientError {
             completion(.failure(error))
         } catch {
-            completion(.failure(.unexpectedError(description: "\(error)")))
+            completion(.failure(.unexpectedError(description: error.localizedDescription, error: error)))
         }
         
         return URLSessionDataTask()
@@ -107,6 +151,10 @@ extension Client {
     }
     
     private func queryItems(for endpoint: Endpoint) -> Result<[URLQueryItem], ClientError> {
+        if apiKey.isEmpty {
+            return .failure(.emptyAPIKey)
+        }
+        
         guard let user = user else {
             return .failure(.emptyUser)
         }
@@ -127,19 +175,19 @@ extension Client {
         if let endpointQueryItems = endpoint.jsonQueryItems {
             endpointQueryItems.forEach { (key: String, value: Encodable) in
                 do {
-                    let data = try JSONEncoder.stream.encode(AnyEncodable(value))
+                    let data = try JSONEncoder.default.encode(AnyEncodable(value))
                     
                     if let json = String(data: data, encoding: .utf8) {
                         queryItems.append(URLQueryItem(name: key, value: json))
                     }
                 } catch {
-                    ClientLogger.log("🐴", error, message: "Encode jsonQueryItems")
+                    logger?.log(error, message: "Encode jsonQueryItems")
                 }
             }
         }
         
         if let endpointQueryItem = endpoint.queryItem {
-            if let data = try? JSONEncoder.stream.encode(AnyEncodable(endpointQueryItem)),
+            if let data = try? JSONEncoder.default.encode(AnyEncodable(endpointQueryItem)),
                 let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 json.forEach { key, value in
                     if let stringValue = value as? String {
@@ -157,8 +205,6 @@ extension Client {
             }
         }
         
-        logger?.log(queryItems)
-        
         return .success(queryItems)
     }
     
@@ -171,11 +217,11 @@ extension Client {
             let encodable = AnyEncodable(body)
             
             do {
-                if let httpBody = try? JSONEncoder.streamGzip.encode(encodable) {
+                if let httpBody = try? JSONEncoder.defaultGzip.encode(encodable) {
                     urlRequest.httpBody = httpBody
                     urlRequest.addValue("gzip", forHTTPHeaderField: "Content-Encoding")
                 } else {
-                    urlRequest.httpBody = try JSONEncoder.stream.encode(encodable)
+                    urlRequest.httpBody = try JSONEncoder.default.encode(encodable)
                 }
             } catch {
                 return .failure(.encodingFailure(error, object: body))
@@ -199,7 +245,8 @@ extension Client {
              .sendFile(let fileName, let mimeType, let data, _):
             multipartFormData = MultipartFormData(data, fileName: fileName, mimeType: mimeType)
         default:
-            return .failure(.unexpectedError(description: "Encoding unexpected endpoint \(endpoint) for a file uploading."))
+            let errorDescription = "Encoding unexpected endpoint \(endpoint) for a file uploading."
+            return .failure(.unexpectedError(description: errorDescription, error: nil))
         }
         
         let data = multipartFormData.multipartFormData
@@ -218,25 +265,28 @@ extension Client {
     private func parse<T: Decodable>(data: Data?, response: URLResponse?, error: Error?, completion: @escaping Completion<T>) {
         logger?.timing("Response received")
         
-        guard let httpResponse = response as? HTTPURLResponse else {
-            logger?.log(response, data: data, forceToShowData: true)
-            let errorDescription = "Expecting HTTPURLResponse, but got \(response?.description ?? "nil")"
-            performInCallbackQueue { completion(.failure(.unexpectedError(description: errorDescription))) }
-            return
-        }
-
-        logger?.log(response, data: data, forceToShowData: httpResponse.statusCode >= 400)
-        
         if let error = error {
             if (error as NSError).code == NSURLErrorCancelled {
-                logger?.log("A request was cancelled: \(error)")
+                logger?.log("🙅‍♂️ A request was cancelled. NSError \(NSURLErrorCancelled)")
+            } else if (error as NSError).code == NSURLErrorNetworkConnectionLost {
+                logger?.log("🤷‍♂️ The network connection was lost. NSError \(NSURLErrorNetworkConnectionLost)")
+                logger?.log(error)
             } else {
-                ClientLogger.log("🐴", error)
+                logger?.log(error)
             }
             
             performInCallbackQueue { completion(.failure(.requestFailed(error))) }
             return
         }
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            logger?.log(response, data: data, forceToShowData: true)
+            let errorDescription = "Expecting HTTPURLResponse, but got \(response?.description ?? "nil")"
+            performInCallbackQueue { completion(.failure(.unexpectedError(description: errorDescription, error: nil))) }
+            return
+        }
+
+        logger?.log(response, data: data, forceToShowData: httpResponse.statusCode >= 400)
         
         guard let data = data, !data.isEmpty else {
             performInCallbackQueue {
@@ -246,13 +296,13 @@ extension Client {
         }
         
         guard httpResponse.statusCode < 400 else {
-            if let errorResponse = try? JSONDecoder.stream.decode(ClientErrorResponse.self, from: data) {
+            if let errorResponse = try? JSONDecoder.default.decode(ClientErrorResponse.self, from: data) {
                 if errorResponse.message.contains("was deactivated") {
                     webSocket.disconnect()
                 }
                 
                 if errorResponse.code == ClientErrorResponse.tokenExpiredErrorCode {
-                    logger?.log("🀄️", "The Token is expired")
+                    logger?.log("🀄️ Token is expired")
                     touchTokenProvider()
                     return
                 }
@@ -265,12 +315,11 @@ extension Client {
         }
         
         do {
-            logger?.timing("Prepare for decoding")
-            let response = try JSONDecoder.stream.decode(T.self, from: data)
+            let response = try JSONDecoder.default.decode(T.self, from: data)
             logger?.timing("Response decoded")
             performInCallbackQueue { completion(.success(response)) }
         } catch {
-            ClientLogger.log("🐴", error)
+            logger?.log(error)
             performInCallbackQueue { completion(.failure(.decodingFailure(error))) }
         }
     }

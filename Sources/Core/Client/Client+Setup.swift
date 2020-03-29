@@ -8,6 +8,7 @@
 
 import Foundation
 import RxSwift
+import UIKit
 
 // MARK: - Setup
 
@@ -20,6 +21,12 @@ extension Client {
     ///     - token: a Stream Chat API token.
     public func set(user: User, token: Token) {
         disconnect()
+        
+        if apiKey.isEmpty || token.isEmpty {
+            logger?.log("❌ API key or token is empty: \(apiKey), \(token)", level: .error)
+            return
+        }
+        
         self.user = user
         setup(token: token)
     }
@@ -54,6 +61,12 @@ extension Client {
     ///   - tokenProvider: a token provider.
     public func set(user: User, _ tokenProvider: @escaping TokenProvider) {
         disconnect()
+        
+        if apiKey.isEmpty {
+            logger?.log("❌ API key is empty.", level: .error)
+            return
+        }
+        
         self.user = user
         self.tokenProvider = tokenProvider
         touchTokenProvider()
@@ -61,26 +74,36 @@ extension Client {
     
     @discardableResult
     func touchTokenProvider() -> Bool {
-        if let tokenProvider = tokenProvider {
-            expiredTokenDisposeBag = DisposeBag()
-            token = nil
-            isExpiredTokenInProgress = true
-            
-            if webSocket.isConnected {
-                webSocket.disconnect()
-            }
-            
-            logger?.log("🀄️", "Request for a new token from a token provider.")
-            tokenProvider { [weak self] in self?.setup(token: $0) }
-            return true
+        guard let tokenProvider = tokenProvider else {
+            return false
         }
         
-        return false
+        if webSocket.isConnected {
+            webSocket.disconnect()
+        }
+        
+        expiredTokenDisposeBag = DisposeBag()
+        isExpiredTokenInProgress = true
+        logger?.log("🀄️ Request for a new token from a token provider.")
+        tokenProvider { [unowned self] in self.setup(token: $0) }
+        
+        return true
     }
     
     private func setup(token: Token) {
+        if webSocket.isConnected {
+            webSocket.disconnect()
+        }
+        
+        self.token = nil
+        
+        if token.isEmpty {
+            logger?.log("❌ Token is empty.", level: .error)
+            return
+        }
+        
         guard let user = user else {
-            logger?.log("❌ User is empty. Skip Token setup.")
+            logger?.log("❌ User is empty. Skip Token setup.", level: .error)
             return
         }
         
@@ -99,16 +122,23 @@ extension Client {
             }
         }
         
-        logger?.log("👤 \(user.name): \(user.id)")
-        logger?.log("🀄️ Token: \(token)")
+        if logOptions.isEnabled {
+            ClientLogger.logger("👤", "", "\(user.name): \(user.id)")
+            ClientLogger.logger("🀄️", "", "Token: \(token)")
+        }
         
         if let error = checkUserAndToken(token) {
-            ClientLogger.log("🐴", error)
+            logger?.log(error)
             return
         }
         
+        guard let webSocket = setupWebSocket(user: user, token: token) else {
+            return
+        }
+        
+        database?.user = user
+        self.webSocket = webSocket
         urlSession = setupURLSession(token: token)
-        webSocket = setupWebSocket(user: user, token: token)
         self.token = token
     }
     
@@ -123,7 +153,7 @@ extension Client {
             if let response = try? result.get() {
                 self.set(user: response.user, token: response.token)
             } else {
-                ClientLogger.log("🐴", result.error, message: "Guest Token")
+                self.logger?.log(result.error, message: "Guest Token")
             }
         }
     }
@@ -142,7 +172,7 @@ extension Client {
             return ClientError.emptyUser
         }
         
-        guard token.isValid, let payload = token.payload else {
+        guard token.isValidToken(userId: user.id), let payload = token.payload else {
             return ClientError.tokenInvalid(description: "Token is invalid or Token payload is invalid")
         }
         
@@ -170,15 +200,21 @@ extension Client {
                 .filter { $0 != .inactive }
                 .distinctUntilChanged()
                 .startWith(app.appState)
-                .do(onNext: { state in ClientLogger.log("📱", "App state \(state)") })
+                .do(onNext: { state in
+                    if Client.shared.logOptions.isEnabled {
+                        ClientLogger.log("📱", "App state \(state)")
+                    }
+                })
         
         let internetIsAvailable: Observable<Bool> = isTests()
             ? .just(true)
             : InternetConnection.shared.isAvailableObservable
         
-        let webSocketResponse = tokenSubject.asObserver()
+        let webSocketResponse = internetIsAvailable
+            .filter({ $0 })
+            .flatMapLatest { [unowned self]  _ in self.tokenSubject.asObserver() }
             .distinctUntilChanged()
-            .map { $0?.isValid ?? false }
+            .map { $0?.isValidToken() ?? false }
             .observeOn(MainScheduler.instance)
             .flatMapLatest({ [unowned self] isTokenValid -> Observable<WebSocketEvent> in
                 if isTokenValid {
@@ -191,16 +227,19 @@ extension Client {
             .do(onDispose: { [unowned self] in self.webSocket.disconnect() })
         
         return Observable.combineLatest(appState, internetIsAvailable, webSocketResponse)
-            .map { [unowned self] in self.webSocket.parseConnection(appState: $0, isInternetAvailable: $1, event: $2) }
-            .unwrap()
+            .compactMap { [unowned self] in self.webSocket.parseConnection(appState: $0, isInternetAvailable: $1, event: $2) }
             .distinctUntilChanged()
             .do(onNext: { [unowned self] in
                 if case .connected(_, let user) = $0 {
                     self.user = user
-                    self.isExpiredTokenInProgress = false
                 }
             })
             .share(replay: 1)
+    }
+    
+    func connectedRequest<T: Decodable>(_ endpoint: Endpoint) -> Observable<T> {
+        let request: Observable<T> = rx.request(endpoint: endpoint)
+        return connectedRequest(request)
     }
     
     func connectedRequest<T>(_ request: Observable<T>) -> Observable<T> {

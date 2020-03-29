@@ -19,30 +19,21 @@ public struct ChannelResponse: Decodable {
     
     /// A channel.
     public let channel: Channel
-    /// Members of the channel (see `Member`).
-    public let members: [Member]
     /// Messages (see `Message`).
     public let messages: [Message]
     /// Message read states (see `MessageRead`)
     public let messageReads: [MessageRead]
     /// Unread message state by the current user.
-    public let unreadMessageRead: MessageRead?
+    public private(set) var unreadMessageRead: MessageRead?
     
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        let members = try container.decode([Member].self, forKey: .members)
         channel = try container.decode(Channel.self, forKey: .channel)
-        members = try container.decode([Member].self, forKey: .members)
         channel.members = Set(members)
-        messages = try container.decode([Message].self, forKey: .messages)
+        messages = try container.decodeIfPresent([Message].self, forKey: .messages) ?? []
         messageReads = try container.decodeIfPresent([MessageRead].self, forKey: .messageReads) ?? []
-        
-        if let lastMessage = messages.last,
-            let messageRead = messageReads.first(where: { $0.user.isCurrent }),
-            lastMessage.updated > messageRead.lastReadDate {
-            unreadMessageRead = messageRead
-        } else  {
-            unreadMessageRead = nil
-        }
+        updateUnreadMessageRead()
     }
     
     /// Init a channel response.
@@ -52,12 +43,36 @@ public struct ChannelResponse: Decodable {
     ///   - channel: a channel.
     ///   - members: members of the channel.
     ///   - messages: messages in the channel.
-    public init(channel: Channel, members: [Member] = [], messages: [Message] = []) {
+    public init(channel: Channel, messages: [Message] = [], messageReads: [MessageRead] = []) {
         self.channel = channel
-        self.members = members
         self.messages = messages
-        messageReads = []
-        unreadMessageRead = nil
+        self.messageReads = messageReads
+        updateUnreadMessageRead()
+    }
+    
+    private mutating func updateUnreadMessageRead() {
+        if let lastMessage = messages.last,
+            let messageRead = messageReads.first(where: { $0.user.isCurrent }),
+            lastMessage.updated > messageRead.lastReadDate {
+            unreadMessageRead = messageRead
+        }
+    }
+}
+
+extension ChannelResponse: Hashable {
+    
+    public static func == (lhs: ChannelResponse, rhs: ChannelResponse) -> Bool {
+        return lhs.channel.cid == rhs.channel.cid
+            && lhs.channel.members == rhs.channel.members
+            && lhs.messages == rhs.messages
+            && lhs.messageReads == rhs.messageReads
+    }
+    
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(channel)
+        hasher.combine(channel.members)
+        hasher.combine(messages)
+        hasher.combine(messageReads)
     }
 }
 

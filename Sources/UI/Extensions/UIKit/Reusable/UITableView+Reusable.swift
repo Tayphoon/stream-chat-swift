@@ -23,7 +23,8 @@ extension UITableView {
     }
     
     final func registerMessageCell(style: MessageViewStyle) {
-        register(MessageTableViewCell.self, forCellReuseIdentifier: reuseIdentifier(cellType: MessageTableViewCell.self, style: style))
+        register(MessageTableViewCell.self,
+                 forCellReuseIdentifier: reuseIdentifier(cellType: MessageTableViewCell.self, style: style))
     }
     
     final func dequeueMessageCell(for indexPath: IndexPath, style: MessageViewStyle) -> MessageTableViewCell {
@@ -33,8 +34,7 @@ extension UITableView {
             fatalError("Failed to dequeue a cell with identifier \(identifier) matching type MessageTableViewCell.")
         }
         
-        cell.style = style
-        
+        cell.setupIfNeeded(style: style)
         return cell
     }
     

@@ -11,25 +11,117 @@ import UIKit
 
 /// A Client logger.
 public final class ClientLogger {
-    /// A client logger options.
-    public enum Options {
-        /// No logs.
-        case none
-        /// Logs for requests.
-        case requests
-        /// Logs only requests headers.
-        case requestsHeaders
-        /// Logs for a web socket.
-        case webSocket
-        /// All logs.
-        case all
+    
+    /// A logger level.
+    public enum Level {
+        case error
+        case debug
+        case info
         
-        var isEnabled: Bool {
-            if case .none = self {
-                return false
+        static func level(_ options: Options) -> Level {
+            if options.isError {
+                return .error
             }
             
-            return true
+            if options.isDebug {
+                return .debug
+            }
+            
+            return .info
+        }
+        
+        func isEnabled(with level: Level) -> Bool {
+            switch (self, level) {
+            case (.error, .debug): return false
+            case (.error, .info): return false
+            case (.debug, .info): return false
+            default: return true
+            }
+        }
+    }
+    
+    /// A client logger options.
+    ///
+    /// It has several levels: Error, Debug and Info.
+    ///  - 🐴 for REST requests: `.requestsError`, `.requests`, `.requestsInfo`
+    ///  - 🦄 for web socket events: `.webSocketError`, `.webSocket`, `.webSocketInfo`
+    ///  - 🗞 for notifications: `.notificationsError`, `.notifications`
+    ///  - 💽 for a database: `.databaseError`, `.database`, `.databaseInfo`
+    ///  - for all error logs: `.error`
+    ///  - for all debug logs: `.debug`
+    ///  - full logs: `.info`
+    public struct Options: OptionSet {
+        public let rawValue: Int
+        
+        /// Logs for requests 🐴. [Error]
+        public static let requestsError = Options(rawValue: 1 << 0)
+        /// Logs for a web socket 🦄. [Error]
+        public static let webSocketError = Options(rawValue: 1 << 1)
+        /// Logs for notifications 🗞. [Error]
+        public static let notificationsError = Options(rawValue: 1 << 2)
+        /// Logs for a database 💽. [Error]
+        public static let databaseError = Options(rawValue: 1 << 3)
+        
+        /// Logs for requests 🐴. [Debug]
+        public static let requests = Options(rawValue: 1 << 10)
+        /// Logs for a web socket 🦄. [Debug]
+        public static let webSocket = Options(rawValue: 1 << 11)
+        /// Logs for notifications 🗞. [Debug]
+        public static let notifications = Options(rawValue: 1 << 12)
+        /// Logs for a database 💽. [Debug]
+        public static let database = Options(rawValue: 1 << 13)
+        
+        /// Logs for requests 🐴. [Info]
+        public static let requestsInfo = Options(rawValue: 1 << 20)
+        /// Logs for a web socket 🦄. [Info]
+        public static let webSocketInfo = Options(rawValue: 1 << 21)
+        /// Logs for a database 💽. [Info]
+        public static let databaseInfo = Options(rawValue: 1 << 23)
+
+        /// All errors.
+        public static let error: Options = [.requestsError, .webSocketError, .notificationsError, databaseError]
+        
+        /// All debug logs.
+        public static let debug: Options = [.requests, .webSocket, .notifications, .database]
+        
+        /// Full logs.
+        public static let info: Options = [.requestsInfo, .webSocketInfo, .notifications, .databaseInfo]
+        
+        // FIXME: Shouldn't be like that.
+        var isEnabled: Bool {
+            return self.rawValue > 0
+        }
+        
+        /// Checks if the level is error.
+        public var isError: Bool {
+            return rawValue < (1 << 10)
+        }
+        
+        /// Checks if the level is debug.
+        public var isDebug: Bool {
+            return rawValue < (1 << 20)
+        }
+        
+        /// Checks if the level is info.
+        public var isInfo: Bool {
+            return rawValue < (1 << 31)
+        }
+        
+        public init(rawValue: Int) {
+            self.rawValue = rawValue
+        }
+        
+        /// Create a logger with intersected log options.
+        /// - Parameters:
+        ///   - icon: a logger icon.
+        ///   - subOptions: a subset of options.
+        public func logger(icon: String, for subOptions: Options) -> ClientLogger? {
+            guard subOptions.isEnabled else {
+                return nil
+            }
+            
+            let intersectedOptions = intersection(subOptions)
+            return intersectedOptions.isEnabled ? ClientLogger(icon: icon, level: .level(intersectedOptions)) : nil
         }
     }
     
@@ -41,55 +133,59 @@ public final class ClientLogger {
     ///     - dateAndTime: a formatted string of date and time, could be empty.
     ///     - message: a message.
     public static var logger: (_ icon: String, _ dateTime: String, _ message: String) -> Void = {
-        if Client.shared.logOptions.isEnabled {
-            print($0, $1.isEmpty ? "" : "[\($1)]", $2)
+        if $1.isEmpty || DateFormatter.log == nil {
+            print($0, $2)
+        } else {
+            print($0, "[\($1)]", $2)
         }
     }
     
     private let icon: String
     private var lastTime: CFTimeInterval
     private var startTime: CFTimeInterval
-    private let options: Options
+    private let level: Level
     
     /// Init a client logger.
-    ///
     /// - Parameters:
     ///   - icon: a string icon.
-    ///   - options: options (see `ClientLogger.Options`).
-    public init(icon: String, options: Options = .none) {
+    ///   - level: level (see `ClientLogger.Level`).
+    public init(icon: String, level: Level) {
         self.icon = icon
-        self.options = options
+        self.level = level
         startTime = CACurrentMediaTime()
         lastTime = startTime
-    }
-    
-    /// Log URLSessionConfiguration.
-    ///
-    /// - Parameter sessionConfiguration: an URL session configuration.
-    public func log(_ sessionConfiguration: URLSessionConfiguration) {
-        if let httpAdditionalHeaders = sessionConfiguration.httpAdditionalHeaders as? [String: String] {
-            log("URL Session Headers", httpAdditionalHeaders.description)
-        }
     }
     
     /// Log a request.
     ///
     /// - Parameter request: an URL request.
     public func log(_ request: URLRequest) {
-        log("➡️ \(request.httpMethod ?? "Request")", request.description)
+        log("➡️ \(request.httpMethod ?? "Request") \(request.description)")
         
-        if let headers = request.allHTTPHeaderFields, !headers.isEmpty {
-            var message = "Request headers:\n"
-            headers.forEach { message += "◾️ \($0) = \($1)\n" }
-            log(message)
+        if level.isEnabled(with: .debug),
+            let url = request.url,
+            url.query != nil,
+            let urlComponents = URLComponents(url: url, resolvingAgainstBaseURL: false),
+            let queryItems = urlComponents.queryItems {
+            log(queryItems)
         }
         
         if let bodyStream = request.httpBodyStream {
-            log("Request Body Stream", bodyStream.description)
+            log("Request Body Stream \(bodyStream.description)", level: .info)
         }
         
-        if let body = request.httpBody {
-            log("Request Body", body)
+        if level.isEnabled(with: .info), let body = request.httpBody {
+            log(body, message: "Request Body")
+        }
+    }
+    
+    /// Log request headers.
+    /// - Parameter headers: headers.
+    public func log(headers: [String: String]?) {
+        if let headers = headers, !headers.isEmpty {
+            var message = "Request headers:\n"
+            headers.forEach { message += "◾️ \($0) = \($1)\n" }
+            log(message, level: .info)
         }
     }
     
@@ -101,20 +197,23 @@ public final class ClientLogger {
             return
         }
         
-        var message = "URL query items:\n"
+        var message = ""
         
         queryItems.forEach { item in
             if let value = item.value,
                 value.hasPrefix("{"),
                 let data = value.data(using: .utf8),
                 let json = try? data.prettyPrintedJSONString() {
-                message += "▫️ \(item.name)=\(json)"
-            } else {
+                message += "▫️ \(item.name)=\(json)\n"
+                
+            } else if item.name != "api_key" && item.name != "user_id" && item.name != "client_id" {
                 message += "▫️ \(item.description)\n"
             }
         }
         
-        log(message)
+        if !message.isEmpty {
+            log("URL query items:\n\(message)")
+        }
     }
     
     /// Log URL response.
@@ -124,42 +223,36 @@ public final class ClientLogger {
     ///   - data: a response data.
     ///   - forceToShowData: force to always log a data.
     public func log(_ response: URLResponse?, data: Data?, forceToShowData: Bool = false) {
-        if let response = response {
-            log("Response", response.description)
+        if let response = response as? HTTPURLResponse, let url = response.url {
+            log("⬅️ Response \(response.statusCode) (\(data?.description ?? "0 bytes")): \(url)")
+        } else if let response = response {
+            log("⬅️❔ Unknown response (\(data?.description ?? "0 bytes")): \(response)")
         }
         
-        guard let data = data else {
+        guard let data = data, (forceToShowData || level.isEnabled(with: .info)) else {
             return
         }
-        
-        if !forceToShowData, options == .requestsHeaders, data.count > 500 {
-            return
-        }
-        
-        let tag = "ⒿⓈⓄⓃ \(data.description)"
         
         if let jsonString = try? data.prettyPrintedJSONString() {
-            log(tag, jsonString)
+            log("📦 \(jsonString)", level: forceToShowData ? .error : .info)
         } else if let dataString = String(data: data, encoding: .utf8) {
-            log(tag, "\"\(dataString)\"")
+            log("📦 \"\(dataString)\"", level: forceToShowData ? .error : .info)
         }
     }
     
     /// Log an error.
     ///
     /// - Parameters:
-    ///   - icon: a string icon, e.g. emoji.
     ///   - error: an error.
     ///   - message: an additional message (optional).
     ///   - function: a callee function (auto).
     ///   - line: a callee line of a code in a function (auto).
-    public static func log(_ icon: String = "",
-                           _ error: Error?,
-                           message: String? = nil,
-                           function: String = #function,
-                           line: Int = #line) {
+    public func log(_ error: Error?,
+                    message: String? = nil,
+                    function: String = #function,
+                    line: Int = #line) {
         if let error = error {
-            ClientLogger.logger("\(icon)❌", "", "\(message ?? "") \(error) in \(function)[\(line)]")
+            log("❌ \(message ?? "") \(error) in \(function)[\(line)]", level: .error)
         }
     }
     
@@ -169,9 +262,18 @@ public final class ClientLogger {
     ///   - tag: a tag.
     ///   - reset: reset the last timing.
     public func timing(_ tag: String = "", reset: Bool = false) {
-        let overall: CFTimeInterval = round((CACurrentMediaTime() - startTime) * 1000) / 1000
-        let time: CFTimeInterval = round((CACurrentMediaTime() - lastTime) * 1000) / 1000
-        log("⏱ \(tag) \(overall) +\(time < 0.001 ? 0 : time)")
+        guard level.isEnabled(with: .debug) else {
+            return
+        }
+        
+        if reset {
+            log("⏱ \(tag)", level: .debug)
+        } else {
+            let overall: CFTimeInterval = round((CACurrentMediaTime() - startTime) * 1000) / 1000
+            let time: CFTimeInterval = round((CACurrentMediaTime() - lastTime) * 1000) / 1000
+            log("⏱ \(tag): \(overall) +\(time < 0.001 ? 0 : time)", level: .debug)
+        }
+        
         lastTime = CACurrentMediaTime()
         
         if reset {
@@ -180,20 +282,21 @@ public final class ClientLogger {
     }
     
     /// Log a data as a pretty printed JSON string.
-    ///
-    /// - Parameters:
-    ///   - identifier: an identifier.
-    ///   - data: a data.
-    public func log(_ identifier: String, _ data: Data?) {
+    /// - Parameter data: a data.
+    public func log(_ data: Data?, message: String = "", forceToShowData: Bool = false) {
+        guard forceToShowData || level.isEnabled(with: .info) else {
+            return
+        }
+        
         guard let data = data, !data.isEmpty else {
-            log(identifier, "Data is empty")
+            log("📦 \(message) Data is empty", level: (forceToShowData ? .error : .info))
             return
         }
         
         do {
-            log(identifier, try data.prettyPrintedJSONString())
+            log("📦 \(message) " + (try data.prettyPrintedJSONString()), level: (forceToShowData ? .error : .info))
         } catch {
-            log(identifier, "\(error)")
+            log("📦 \(message) \(error)", level: (forceToShowData ? .error : .info))
         }
     }
     
@@ -202,15 +305,10 @@ public final class ClientLogger {
     /// - Parameters:
     ///   - identifier: an identifier.
     ///   - message: a message.
-    public func log(_ identifier: String, _ message: String) {
-        ClientLogger.log(icon, dateTime: Date().log, "\(identifier) \(message)")
-    }
-    
-    /// Log a message.
-    ///
-    /// - Parameter message: a message.
-    public func log(_ message: String) {
-        ClientLogger.log(icon, dateTime: Date().log, message)
+    public func log(_ message: String, level: Level = .debug) {
+        if self.level.isEnabled(with: level) {
+            ClientLogger.log(icon, dateTime: Date().log, message)
+        }
     }
     
     /// Log a message.
@@ -237,16 +335,18 @@ public final class ClientLogger {
 }
 
 extension Date {
-    
-    private static let logDateFormatter: DateFormatter = {
+    /// A string of the date for the `ClientLogger`.
+    public var log: String {
+        return DateFormatter.log?.string(from: self) ?? ""
+    }
+}
+
+extension DateFormatter {
+    /// A date formatter for `ClientLogger`.
+    public static var log: DateFormatter? = {
         let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "dd/MM/yyyy HH:mm:ss.SSS"
+        dateFormatter.dateFormat = "dd MMM HH:mm:ss.SSS"
         dateFormatter.locale = Locale(identifier: "en_US_POSIX")
         return dateFormatter
     }()
-    
-    /// A string of the date for the `ClientLogger`.
-    public var log: String {
-        return Date.logDateFormatter.string(from: self)
-    }
 }

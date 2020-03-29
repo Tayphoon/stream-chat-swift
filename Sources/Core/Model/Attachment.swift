@@ -74,12 +74,7 @@ public struct Attachment: Codable {
         text = nil
         author = nil
         actions = []
-        
-        if let extraData = extraData {
-            self.extraData = ExtraData(extraData)
-        } else {
-            self.extraData = nil
-        }
+        self.extraData = ExtraData(extraData)
     }
     
     public init(from decoder: Decoder) throws {
@@ -122,6 +117,7 @@ public struct Attachment: Codable {
                 type = existsType
             }
         } else if let _ = try? container.decodeIfPresent(String.self, forKey: .ogURL) {
+            // swiftlint:disable:previous unused_optional_binding
             type = .link
         } else {
             type = .unknown
@@ -131,7 +127,7 @@ public struct Attachment: Codable {
         self.text = text
         file = (type == .file || type == .video) ? try AttachmentFile(from: decoder) : nil
         actions = try container.decodeIfPresent([Action].self, forKey: .actions) ?? []
-        extraData = .decode(from: decoder, ExtraData.decodableTypes.first(where: { $0.isAttachment }))
+        extraData = ExtraData(ExtraData.decodableTypes.first(where: { $0.isAttachment })?.decode(from: decoder))
     }
     
     /// Image upload:
@@ -156,7 +152,7 @@ public struct Attachment: Codable {
         try container.encodeIfPresent(url, forKey: .assetURL)
         try container.encodeIfPresent(imageURL, forKey: .imageURL)
         try file?.encode(to: encoder)
-        extraData?.encodeSafely(to: encoder)
+        extraData?.encodeSafely(to: encoder, logMessage: "📦 when encoding an extra data for attachment")
     }
     
     private static func fixedURL(_ urlString: String?) -> URL? {
@@ -202,6 +198,21 @@ public extension Attachment {
         /// Check if the action is send button.
         public var isSend: Bool {
             return value == "send"
+        }
+        
+        /// Init an attachment action.
+        /// - Parameters:
+        ///   - name: a name.
+        ///   - value: a value.
+        ///   - style: a style.
+        ///   - type: a type.
+        ///   - text: a text.
+        public init(name: String, value: String, style: ActionStyle, type: ActionType, text: String) {
+            self.name = name
+            self.value = value
+            self.style = style
+            self.type = type
+            self.text = text
         }
     }
     
@@ -290,7 +301,7 @@ public enum AttachmentType: RawRepresentable, Codable, Equatable {
 
     public func encode(to encoder: Encoder) throws {
         guard self != .unknown else {
-            throw ClientError.encodingFailure(EncodingError.valueUnsupported, object: self)
+            throw EncodingError.attachmentUnsupported
         }
         var container = encoder.singleValueContainer()
         try container.encode(rawValue)
@@ -324,7 +335,12 @@ public struct AttachmentFile: Codable {
         return AttachmentFile.sizeFormatter.string(fromByteCount: size)
     }
     
-    init(type: AttachmentFileType, size: Int64, mimeType: String?) {
+    /// Init an attachment file.
+    /// - Parameters:
+    ///   - type: a file type.
+    ///   - size: a file size.
+    ///   - mimeType: a mime type.
+    public init(type: AttachmentFileType, size: Int64, mimeType: String?) {
         self.type = type
         self.size = size
         self.mimeType = mimeType

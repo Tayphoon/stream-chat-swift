@@ -27,7 +27,7 @@ public struct Message: Codable {
         case replyCount = "reply_count"
         case latestReactions = "latest_reactions"
         case ownReactions = "own_reactions"
-        case reactionCounts = "reaction_counts"
+        case reactionScores = "reaction_scores"
     }
     
     /// A message id.
@@ -53,7 +53,7 @@ public struct Message: Codable {
     /// A parent message id.
     public let parentId: String?
     /// Check if this reply message needs to show in the channel.
-    public let showReplyInChannel: Bool?
+    public let showReplyInChannel: Bool
     /// Mentioned users (see `User`).
     public let mentionedUsers: [User]
     /// Reply count.
@@ -65,7 +65,7 @@ public struct Message: Codable {
     /// The current user own reactions (see `Reaction`).
     public private(set) var ownReactions: [Reaction]
     /// A reactions count (see `ReactionCounts`).
-    public private(set) var reactionCounts: ReactionCounts?
+    public private(set) var reactionScores: ReactionScores?
     
     /// Check if the message is ephemeral, e.g. Giphy preview.
     public var isEphemeral: Bool {
@@ -94,7 +94,7 @@ public struct Message: Codable {
     
     /// Check if the message has reactions.
     public var hasReactions: Bool {
-        return reactionCounts != nil && !(reactionCounts?.counts.isEmpty ?? true)
+        return reactionScores != nil && !(reactionScores?.scores.isEmpty ?? true)
     }
     
     /// A combination of message text and command args.
@@ -113,6 +113,11 @@ public struct Message: Codable {
         return id.isEmpty && type == .error && text == "You are not allowed to post messages on this channel"
     }
     
+    /// Checks if the message is empty.
+    public var isEmpty: Bool {
+        return text.isBlank && attachments.isEmpty && command.isBlank && extraData == nil
+    }
+    
     /// Init a message.
     ///
     /// - Parameters:
@@ -124,41 +129,47 @@ public struct Message: Codable {
     ///   - mentionedUsers: a list of mentioned users.
     ///   - showReplyInChannel: a flag to show reply messages in a channel, not in a separate thread.
     public init(id: String = "",
-                text: String,
-                attachments: [Attachment] = [],
-                extraData: Codable? = nil,
+                type: MessageType = .regular,
                 parentId: String? = nil,
+                created: Date = .default,
+                updated: Date = .default,
+                deleted: Date? = nil,
+                text: String,
+                command: String? = nil,
+                args: String? = nil,
+                user: User = .unknown,
+                attachments: [Attachment] = [],
                 mentionedUsers: [User] = [],
+                extraData: Codable? = nil,
+                latestReactions: [Reaction] = [],
+                ownReactions: [Reaction] = [],
+                reactionScores: ReactionScores? = nil,
+                replyCount: Int = 0,
                 showReplyInChannel: Bool = false) {
         self.id = id
+        self.type = type
         self.parentId = parentId
-        self.showReplyInChannel = showReplyInChannel
-        type = .regular
-        user = .unknown
-        created = .default
-        updated = .default
-        deleted = nil
+        self.created = created
+        self.updated = updated
+        self.deleted = deleted
         self.text = text
-        command = nil
-        args = nil
+        self.command = command
+        self.args = args
+        self.user = user
         self.attachments = attachments
         self.mentionedUsers = mentionedUsers
-        replyCount = 0
-        latestReactions = []
-        ownReactions = []
-        reactionCounts = nil
-        
-        if let extraData = extraData {
-            self.extraData = ExtraData(extraData)
-        } else {
-            self.extraData = nil
-        }
+        self.extraData = ExtraData(extraData)
+        self.latestReactions = latestReactions
+        self.ownReactions = ownReactions
+        self.reactionScores = reactionScores
+        self.replyCount = replyCount
+        self.showReplyInChannel = showReplyInChannel
     }
     
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(text, forKey: .text)
-        extraData?.encodeSafely(to: encoder)
+        extraData?.encodeSafely(to: encoder, logMessage: "📦 when encoding a message extra data")
         
         if !attachments.isEmpty {
             try container.encode(attachments, forKey: .attachments)
@@ -182,23 +193,23 @@ public struct Message: Codable {
         created = try container.decode(Date.self, forKey: .created)
         updated = try container.decode(Date.self, forKey: .updated)
         deleted = try container.decodeIfPresent(Date.self, forKey: .deleted)
-        text = try container.decode(String.self, forKey: .text)
+        text = try container.decode(String.self, forKey: .text).trimmingCharacters(in: .whitespacesAndNewlines)
         command = try container.decodeIfPresent(String.self, forKey: .command)
         args = try container.decodeIfPresent(String.self, forKey: .args)
         attachments = try container.decode([Attachment].self, forKey: .attachments)
         parentId = try container.decodeIfPresent(String.self, forKey: .parentId)
-        showReplyInChannel = false
+        showReplyInChannel = try container.decodeIfPresent(Bool.self, forKey: .showReplyInChannel) ?? false
         mentionedUsers = try container.decode([User].self, forKey: .mentionedUsers)
         replyCount = try container.decode(Int.self, forKey: .replyCount)
-        latestReactions = try container.decode([Reaction].self, forKey: .latestReactions)
-        ownReactions = try container.decode([Reaction].self, forKey: .ownReactions)
-        extraData = .decode(from: decoder, ExtraData.decodableTypes.first(where: { $0.isMessage }))
+        latestReactions = (try? container.decode([Reaction].self, forKey: .latestReactions)) ?? []
+        ownReactions = (try? container.decode([Reaction].self, forKey: .ownReactions)) ?? []
+        extraData = ExtraData(ExtraData.decodableTypes.first(where: { $0.isMessage })?.decode(from: decoder))
         
-        if let reactionCounts = try container.decodeIfPresent(ReactionCounts.self, forKey: .reactionCounts),
-            !reactionCounts.counts.isEmpty {
-            self.reactionCounts = reactionCounts
+        if let reactionScores = try? container.decodeIfPresent(ReactionScores.self, forKey: .reactionScores),
+            !reactionScores.scores.isEmpty {
+            self.reactionScores = reactionScores
         } else {
-            reactionCounts = nil
+            reactionScores = nil
         }
     }
     
@@ -208,15 +219,27 @@ public struct Message: Codable {
     }
 }
 
-extension Message: Equatable {
+extension Message: Hashable {
     public static func == (lhs: Message, rhs: Message) -> Bool {
         return lhs.id == rhs.id
             && lhs.type == rhs.type
             && lhs.user == rhs.user
             && lhs.text == rhs.text
+            && lhs.command == rhs.command
             && lhs.created == rhs.created
             && lhs.updated == rhs.updated
             && lhs.deleted == rhs.deleted
+    }
+    
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(type)
+        hasher.combine(user)
+        hasher.combine(text)
+        hasher.combine(command)
+        hasher.combine(created)
+        hasher.combine(updated)
+        hasher.combine(deleted)
     }
 }
 
@@ -225,7 +248,6 @@ extension Message: Equatable {
 public extension Message {
     
     /// Check if the message has a reaction with the given type from the current user.
-    ///
     /// - Parameter type: a reaction type.
     /// - Returns: true if the message has a reaction type.
     func hasOwnReaction(type: ReactionType) -> Bool {
@@ -233,11 +255,10 @@ public extension Message {
     }
     
     /// Add a given reaction to the current user own reactions.
-    ///
     /// - Parameters:
     ///   - reaction: a reaction for adding.
     ///   - reactions: the current list of user own reactions.
-    mutating func addToOwnReactions(_ reaction: Reaction, reactions: [Reaction]) {
+    mutating func addOrUpdate(reaction: Reaction, toOwnReactions reactions: [Reaction]) {
         var reactions = reactions
         
         if let index = reactions.firstIndex(where: { $0.type == reaction.type }) {
@@ -250,11 +271,10 @@ public extension Message {
     }
     
     /// Delete a given reaction from the current user own reaction.
-    ///
     /// - Parameters:
     ///   - reaction: a reaction for deleting.
     ///   - reactions: the current list of user own reactions.
-    mutating func deleteFromOwnReactions(_ reaction: Reaction, reactions: [Reaction]) {
+    mutating func delete(reaction: Reaction, fromOwnReactions reactions: [Reaction]) {
         var reactions = reactions
         
         if let index = reactions.firstIndex(where: { $0.type == reaction.type }) {

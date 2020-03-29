@@ -24,7 +24,7 @@ class TestCase: XCTestCase {
         
         isClientReady = true
         ClientLogger.logger = { print($0, $1.isEmpty ? "" : "[\($1)]", $2) }
-        Client.config = .init(apiKey: TestCase.apiKey, logOptions: .all)
+        Client.config = .init(apiKey: TestCase.apiKey, logOptions: .info)
         Client.shared.set(user: .user1, token: .token1)
     }
     
@@ -33,6 +33,9 @@ class TestCase: XCTestCase {
             Client.shared.connection.connected().subscribe().disposed(by: disposeBag)
         }
     }
+}
+
+extension XCTestCase {
     
     func expectRequest(_ description: String, callback: (_ test: XCTestExpectation) -> Void) {
         expect(description, timeout: 5, callback: callback)

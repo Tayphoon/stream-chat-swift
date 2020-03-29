@@ -10,12 +10,13 @@ import Foundation
 
 /// Chat endpoints.
 public enum Endpoint {
-    // MARK: - Client Endpoints
+    
+    // MARK: Auth Endpoints
     
     /// Get a guest token.
     case guestToken(User)
     
-    // MARK: - Device Endpoints
+    // MARK: Device Endpoints
     
     /// Add a device with a given identifier for Push Notifications.
     case addDevice(deviceId: String, User)
@@ -24,10 +25,17 @@ public enum Endpoint {
     /// Remove a device with a given identifier.
     case removeDevice(deviceId: String, User)
     
-    // MARK: - Channels Endpoints
+    // MARK: Client Endpoints
     
     /// Get a list of channels.
     case channels(ChannelsQuery)
+    /// Get a message by id.
+    case message(String)
+    /// Mark all messages as readed.
+    case markAllRead
+    
+    /// Message search.
+    case search(SearchQuery)
     
     // MARK: - Channel Endpoints
     
@@ -35,10 +43,12 @@ public enum Endpoint {
     case channel(ChannelQuery)
     /// Stop watching a channel.
     case stopWatching(Channel)
+    /// Update a channel.
+    case updateChannel(ChannelUpdate)
     /// Delete a channel.
     case deleteChannel(Channel)
     /// Hide a channel.
-    case hideChannel(Channel, User?)
+    case hideChannel(Channel, User?, _ clearHistory: Bool)
     /// Show a channel if it was hidden.
     case showChannel(Channel, User?)
     /// Send a message to a channel.
@@ -57,9 +67,15 @@ public enum Endpoint {
     case sendEvent(EventType, Channel)
     /// Send a message action.
     case sendMessageAction(MessageAction)
+    /// Add members to the channel
+    case addMembers(Set<Member>, Channel)
+    /// Remove members to the channel
+    case removeMembers(Set<Member>, Channel)
+    /// Invite members.
+    case invite(Set<Member>, Channel)
     /// Send an answer for an invite.
     case inviteAnswer(ChannelInviteAnswer)
-
+    
     // MARK: - Message Endpoints
     
     /// Get a thread data.
@@ -67,7 +83,7 @@ public enum Endpoint {
     /// Delete a message.
     case deleteMessage(Message)
     /// Add a reaction to the message.
-    case addReaction(ReactionType, Message)
+    case addReaction(Reaction)
     /// Delete a reaction from the message.
     case deleteReaction(ReactionType, Message)
     /// Flag a message.
@@ -85,12 +101,18 @@ public enum Endpoint {
     case muteUser(User)
     /// Unmute a user.
     case unmuteUser(User)
+    /// Flag a user.
+    case flagUser(User)
+    /// Unflag a user.
+    case unflagUser(User)
+    /// Ban a user.
+    case ban(UserBan)
 }
 
 extension Endpoint {
-    var method: Client.Method {
+    var method: Method {
         switch self {
-        case .channels, .replies, .users, .devices:
+        case .search, .channels, .message, .replies, .users, .devices:
             return .get
         case .removeDevice, .deleteChannel, .deleteMessage, .deleteReaction, .deleteImage, .deleteFile:
             return .delete
@@ -107,38 +129,49 @@ extension Endpoint {
              .devices,
              .removeDevice:
             return "devices"
+        case .search:
+            return "search"
         case .channels:
             return "channels"
+        case .message(let messageId):
+            return "messages/\(messageId)"
+        case .markAllRead:
+            return "channels/read"
+        case .deleteChannel(let channel),
+             .invite(_, let channel),
+             .addMembers(_, let channel),
+             .removeMembers(_, let channel):
+            return path(to: channel)
         case .channel(let query):
             return path(to: query.channel, "query")
         case .stopWatching(let channel):
             return path(to: channel, "stop-watching")
-        case .deleteChannel(let channel):
-            return path(to: channel)
+        case .updateChannel(let channelUpdate):
+            return path(to: channelUpdate.data.channel)
         case .showChannel(let channel, _):
             return path(to: channel, "show")
-        case .hideChannel(let channel, _):
+        case .hideChannel(let channel, _, _):
             return path(to: channel, "hide")
         case .replies(let message, _):
-            return path(to: message, "replies")
+            return path(to: message.id, "replies")
             
         case let .sendMessage(message, channel):
             if message.id.isEmpty {
                 return path(to: channel, "message")
             }
             
-            return path(to: message)
+            return path(to: message.id)
             
         case .sendMessageAction(let messageAction):
-            return path(to: messageAction.message, "action")
+            return path(to: messageAction.message.id, "action")
         case .deleteMessage(let message):
-            return path(to: message)
+            return path(to: message.id)
         case .markRead(let channel):
             return path(to: channel, "read")
-        case .addReaction(_, let message):
-            return path(to: message, "reaction")
+        case .addReaction(let reaction):
+            return path(to: reaction.messageId, "reaction")
         case .deleteReaction(let reactionType, let message):
-            return path(to: message, "reaction/\(reactionType.rawValue)")
+            return path(to: message.id, "reaction/\(reactionType.name)")
         case .sendEvent(_, let channel):
             return path(to: channel, "event")
         case .sendImage(_, _, _, let channel):
@@ -155,10 +188,14 @@ extension Endpoint {
             return "moderation/mute"
         case .unmuteUser:
             return "moderation/unmute"
-        case .flagMessage:
+        case .flagUser,
+             .flagMessage:
             return "moderation/flag"
-        case .unflagMessage:
+        case .unflagUser,
+             .unflagMessage:
             return "moderation/unflag"
+        case .ban:
+            return "moderation/ban"
         case .inviteAnswer(let answer):
             return path(to: answer.channel)
         }
@@ -181,6 +218,8 @@ extension Endpoint {
         let payload: Encodable
         
         switch self {
+        case .search(let query):
+            payload = query
         case .channels(let query):
             payload = query
         case .users(let query):
@@ -195,7 +234,9 @@ extension Endpoint {
     var body: Encodable? {
         switch self {
         case .removeDevice,
+             .search,
              .channels,
+             .message,
              .deleteChannel,
              .replies,
              .deleteMessage,
@@ -207,9 +248,13 @@ extension Endpoint {
              .users:
             return nil
             
-        case .stopWatching,
-             .markRead:
+        case .markAllRead,
+             .markRead,
+             .stopWatching:
             return EmptyData()
+            
+        case .updateChannel(let channelUpdate):
+            return channelUpdate
             
         case .guestToken(let user):
             return ["user": user]
@@ -223,10 +268,16 @@ extension Endpoint {
         case .channel(let query):
             return query
             
-        case .showChannel(_, let user),
-             .hideChannel(_, let user):
+        case .showChannel(_, let user):
             if let user = user {
                 return ["user_id": user.id]
+            }
+            
+            return nil
+            
+        case .hideChannel(_, let user, let clearHistory):
+            if let user = user {
+                return HiddenChannelRequest(userId: user.id, clearHistory: clearHistory)
             }
             
             return nil
@@ -237,8 +288,8 @@ extension Endpoint {
         case .sendMessageAction(let messageAction):
             return messageAction
             
-        case .addReaction(let reactionType, _):
-            return ["reaction": ["type": reactionType.rawValue]]
+        case .addReaction(let reaction):
+            return ["reaction": reaction]
             
         case .sendEvent(let event, _):
             return ["event": ["type": event]]
@@ -258,8 +309,23 @@ extension Endpoint {
         case .flagMessage(let message), .unflagMessage(let message):
             return ["target_message_id": message.id]
             
+        case .flagUser(let user), .unflagUser(let user):
+            return ["target_user_id": user.id]
+            
+        case .ban(let userBan):
+            return userBan
+            
+        case .invite(let members, _):
+            return ["invites": members]
+            
         case .inviteAnswer(let answer):
             return answer
+            
+        case .addMembers(let members, _):
+            return ["add_members": members]
+            
+        case .removeMembers(let members, _):
+            return ["remove_members": members]
         }
     }
     
@@ -274,10 +340,20 @@ extension Endpoint {
     }
     
     private func path(to channel: Channel, _ subPath: String? = nil) -> String {
-        return "channels/\(channel.type.rawValue)\(channel.id.isEmpty ? "" : "/\(channel.id)")\(subPath == nil ? "" : "/\(subPath ?? "")")"
+        "channels/\(channel.type.rawValue)\(channel.id.isEmpty ? "" : "/\(channel.id)")\(subPath == nil ? "" : "/\(subPath ?? "")")"
     }
     
-    private func path(to message: Message, _ subPath: String? = nil) -> String {
-        return "messages/\(message.id)\(subPath == nil ? "" : "/\(subPath ?? "")")"
+    private func path(to messageId: String, _ subPath: String? = nil) -> String {
+        return "messages/\(messageId)\(subPath == nil ? "" : "/\(subPath ?? "")")"
+    }
+}
+
+// MARK: - Method
+
+extension Endpoint {
+    enum Method: String {
+        case get = "GET"
+        case post = "POST"
+        case delete = "DELETE"
     }
 }

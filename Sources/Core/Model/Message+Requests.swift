@@ -9,11 +9,11 @@
 import Foundation
 import RxSwift
 
-// MARK: - Requests
+// MARK: Requests
 
 public extension Message {
     
-    private static var flaggedIds = [String]()
+    internal static var flaggedIds = [String]()
     
     /// Delete the message.
     ///
@@ -24,18 +24,21 @@ public extension Message {
     
     /// Add a reaction to the message.
     ///
-    /// - Parameter reactionType: a reaction type, e.g. like.
-    /// - Returns: an observable message response.
-    func addReaction(_ reactionType: ReactionType) -> Observable<MessageResponse> {
-        return Client.shared.rx.connectedRequest(endpoint: .addReaction(reactionType, self))
+    /// - Parameters:
+    ///   - type: a reaction type.
+    ///   - score: a reaction score, e.g. `.cumulative` it could be more then 1.
+    ///   - extraData: a reaction extra data.
+    func addReaction(type: ReactionType, score: Int = 1, extraData: Codable? = nil) -> Observable<MessageResponse> {
+        let reaction = Reaction(type: type, score: score, messageId: id, extraData: extraData)
+        return Client.shared.rx.connectedRequest(endpoint: .addReaction(reaction))
     }
     
     /// Delete a reaction to the message.
     ///
-    /// - Parameter reactionType: a reaction type, e.g. like.
+    /// - Parameter type: a reaction type, e.g. like.
     /// - Returns: an observable message response.
-    func deleteReaction(_ reactionType: ReactionType) -> Observable<MessageResponse> {
-        return Client.shared.rx.connectedRequest(endpoint: .deleteReaction(reactionType, self))
+    func deleteReaction(type: ReactionType) -> Observable<MessageResponse> {
+        return Client.shared.rx.connectedRequest(endpoint: .deleteReaction(type, self))
     }
     
     /// Send a request for reply messages.
@@ -44,20 +47,18 @@ public extension Message {
     /// - Returns: an observable message response.
     func replies(pagination: Pagination) -> Observable<[Message]> {
         return Client.shared.rx.connectedRequest(endpoint: .replies(self, pagination))
-            .map { (response: MessagesResponse) -> [Message] in response.messages }
-            .do(onNext: { Client.shared.database?.add(replies: $0, for: self) })
+            .map { (response: MessagesResponse) in response.messages }
+            .do(onNext: { self.add(repliesToDatabase: $0) })
     }
     
-    /// Fetch a reply messages from a database.
-    ///
-    /// - Parameter pagination: a pagination (see `Pagination`).
-    /// - Returns: an observable message response.
-    func fetchReplies(pagination: Pagination) -> Observable<[Message]> {
-        return Client.shared.database?.replies(for: self, pagination: pagination) ?? .empty()
+    // MARK: Flag Message
+    
+    /// Checks if the message is flagged (locally).
+    var isFlagged: Bool {
+        return Message.flaggedIds.contains(id)
     }
     
     /// Flag a message.
-    ///
     /// - Returns: an observable flag message response.
     func flag() -> Observable<FlagMessageResponse> {
         guard !user.isCurrent else {
@@ -70,7 +71,6 @@ public extension Message {
     }
     
     /// Unflag a message.
-    ///
     /// - Returns: an observable flag message response.
     func unflag() -> Observable<FlagMessageResponse> {
         guard !user.isCurrent else {
@@ -87,23 +87,9 @@ public extension Message {
             }))
     }
     
-    /// Checks if the message is flagged (locally).
-    var isFlagged: Bool {
-        return Message.flaggedIds.contains(id)
-    }
-    
     private func flagUnflagMessage(endpoint: Endpoint) -> Observable<FlagMessageResponse> {
-        let request: Observable<FlagResponse> = Client.shared.rx.request(endpoint: endpoint)
-        return request.map { $0.flag }
-            .catchError { error -> Observable<FlagMessageResponse> in
-                if let clientError = error as? ClientError,
-                    case .responseError(let clientResponseError) = clientError,
-                    clientResponseError.message.contains("flag already exists") {
-                    return .just(FlagMessageResponse(messageId: self.id, created: Date(), updated: Date()))
-                }
-                
-                return .error(error)
-        }
+        return Client.shared.flagUnflag(endpoint: endpoint,
+                                        aleradyFlagged: FlagMessageResponse(messageId: id, created: Date(), updated: Date()))
     }
 }
 
@@ -115,8 +101,8 @@ public struct MessagesResponse: Decodable {
     let messages: [Message]
 }
 
-struct FlagResponse: Decodable {
-    let flag: FlagMessageResponse
+struct FlagResponse<T: Decodable>: Decodable {
+    let flag: T
 }
 
 /// A flag message response.
@@ -129,6 +115,22 @@ public struct FlagMessageResponse: Decodable {
     
     /// A flagged message id.
     public let messageId: String
+    /// A created date.
+    public let created: Date
+    /// A updated date.
+    public let updated: Date
+}
+
+/// A flag message response.
+public struct FlagUserResponse: Decodable {
+    private enum CodingKeys: String, CodingKey {
+        case user = "target_user"
+        case created = "created_at"
+        case updated = "updated_at"
+    }
+    
+    /// A flagged user.
+    public let user: User
     /// A created date.
     public let created: Date
     /// A updated date.

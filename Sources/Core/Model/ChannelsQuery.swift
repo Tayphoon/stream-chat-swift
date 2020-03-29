@@ -18,7 +18,7 @@ public struct ChannelsQuery: Encodable {
         case watch
         case presence
         case pagination
-        case messageLimit = "message_limit"
+        case messagesLimit = "message_limit"
     }
     
     /// A filter for the query (see `Filter`).
@@ -28,19 +28,30 @@ public struct ChannelsQuery: Encodable {
     /// A pagination.
     public let pagination: Pagination
     /// A number of messages inside each channel.
-    public let messageLimit: Pagination
+    public let messagesLimit: Pagination
     /// Query options.
     public let options: QueryOptions
     
+    /// An hash id for filter and sorting properties.
+    public var id: String {
+        return "F:\(filter)S:\(sort)".md5
+    }
+    
+    /// Init a channels query.
+    /// - Parameter filter: a channels filter.
+    /// - Parameter sort: a sorting list for channels.
+    /// - Parameter pagination: a channels pagination.
+    /// - Parameter messagesLimit: a messages pagination for the each channel.
+    /// - Parameter options: a query options (see `QueryOptions`).
     public init(filter: Filter,
                 sort: [Sorting] = [],
                 pagination: Pagination = .channelsPageSize,
-                messageLimit: Pagination = .messagesPageSize,
+                messagesLimit: Pagination = .messagesPageSize,
                 options: QueryOptions = []) {
         self.filter = filter
         self.sort = sort
         self.pagination = pagination
-        self.messageLimit = messageLimit
+        self.messagesLimit = messagesLimit
         self.options = options
     }
     
@@ -55,7 +66,7 @@ public struct ChannelsQuery: Encodable {
             try container.encode(sort, forKey: .sort)
         }
         
-        try container.encode(messageLimit.limit, forKey: .messageLimit)
+        try container.encode(messagesLimit.limit, forKey: .messagesLimit)
         try options.encode(to: encoder)
         try pagination.encode(to: encoder)
         

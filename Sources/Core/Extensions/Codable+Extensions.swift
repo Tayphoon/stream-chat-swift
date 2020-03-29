@@ -12,6 +12,10 @@ import Gzip
 // MARK: - JSONDecoder Stream
 
 extension JSONDecoder {
+    
+    /// A default `JSONDecoder`.
+    public static var `default`: JSONDecoder = stream
+    
     /// A Stream Chat JSON decoder.
     public static let stream: JSONDecoder = {
         let decoder = JSONDecoder()
@@ -45,6 +49,12 @@ extension JSONDecoder {
 // MARK: - JSONEncoder Stream
 
 extension JSONEncoder {
+    
+    /// A default `JSONEncoder`.
+    public static var `default`: JSONEncoder = stream
+    /// A default gzip `JSONEncoder`.
+    public static var defaultGzip: JSONEncoder = streamGzip
+    
     /// A Stream Chat JSON encoder.
     public static let stream: JSONEncoder = {
         let encoder = JSONEncoder()
@@ -86,14 +96,14 @@ extension JSONEncoder.DateEncodingStrategy {
 
 extension DateFormatter {
     /// A Stream Chat date formatters.
-    public struct Stream {
+    public enum Stream {
         
         /// Creates and returns a date object from the specified ISO 8601 formatted string representation.
         ///
         /// - Parameter string: The ISO 8601 formatted string representation of a date.
         /// - Returns: A date object, or nil if no valid date was found.
         public static func iso8601Date(from string: String) -> Date? {
-            if #available(iOS 11, macOS 10.13, *) {
+            if #available(iOS 11.2, macOS 10.13, *) {
                 return Stream.iso8601DateFormatter.date(from: string)
             }
             
@@ -105,7 +115,7 @@ extension DateFormatter {
         /// - Parameter date: The date to be represented.
         /// - Returns: A user-readable string representing the date.
         public static func iso8601DateString(from date: Date) -> String? {
-            if #available(iOS 11, macOS 10.13, *) {
+            if #available(iOS 11.2, macOS 10.13, *) {
                 return Stream.iso8601DateFormatter.string(from: date)
             }
             
@@ -140,6 +150,20 @@ struct AnyEncodable: Encodable {
     
     func encode(to encoder: Encoder) throws {
         try encodable.encode(to: encoder)
+    }
+}
+
+// MARK: - Safe Helpers
+
+extension Encodable {
+    func encodeSafely(to encoder: Encoder, logMessage: String? = nil) {
+        do {
+            try encode(to: encoder)
+        } catch {
+            if let logMessage = logMessage {
+                Client.shared.logger?.log(error, message: "⚠️ \(logMessage): \(encoder)")
+            }
+        }
     }
 }
 

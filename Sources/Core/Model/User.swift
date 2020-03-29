@@ -15,18 +15,20 @@ public struct User: Codable {
         case name
         case avatarURL = "image"
         case role
-        case online
+        case isOnline = "online"
         case isBanned = "banned"
         case created = "created_at"
         case updated = "updated_at"
         case lastActiveDate = "last_active"
+        case isInvisible = "invisible"
         case devices
         case mutedUsers = "mutes"
         case messagesUnreadCount = "unread_count"
         case channelsUnreadCount = "unread_channels"
     }
     
-    static let unknown = User(id: "", name: "")
+    /// An unkown user.
+    public static let unknown = User(id: "", name: "")
     
     public enum Role: String, Codable {
         case user
@@ -47,11 +49,15 @@ public struct User: Codable {
     /// A last active date.
     public let lastActiveDate: Date?
     /// An indicator if a user is online.
-    public let online: Bool
+    public let isOnline: Bool
+    /// An indicator if a user is invisible.
+    public let isInvisible: Bool
     /// An indicator if a user was banned.
     public internal(set) var isBanned: Bool
     /// A user role.
     public let role: Role
+    /// An extra data for the user.
+    public let extraData: ExtraData?
     /// A list of devices.
     public internal(set) var devices: [Device]
     /// A list of devices.
@@ -100,35 +106,49 @@ public struct User: Codable {
     ///     - id: a user id.
     ///     - name: a user name.
     ///     - an avatar URL.
-    public init(id: String, name: String, avatarURL: URL? = nil) {
+    public init(id: String,
+                name: String,
+                role: Role = .user,
+                avatarURL: URL? = nil,
+                created: Date = .default,
+                updated: Date = .default,
+                lastActiveDate: Date? = nil,
+                isInvisible: Bool = false,
+                isBanned: Bool = false,
+                mutedUsers: [MutedUser] = [],
+                extraData: Codable? = nil) {
         self.id = id
         self.name = name
         self.avatarURL = avatarURL
-        role = .user
-        created = .default
-        updated = .default
-        lastActiveDate = .default
-        online = false
-        devices = []
-        mutedUsers = []
+        self.role = role
+        self.created = created
+        self.updated = updated
+        self.lastActiveDate = lastActiveDate
+        isOnline = false
+        self.isInvisible = isInvisible
+        self.isBanned = isBanned
+        self.mutedUsers = mutedUsers
         messagesUnreadCount = 0
         channelsUnreadCount = 0
-        isBanned = false
+        devices = []
+        self.extraData = ExtraData(extraData)
     }
     
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
+        role = try container.decode(Role.self, forKey: .role)
         created = try container.decode(Date.self, forKey: .created)
         updated = try container.decode(Date.self, forKey: .updated)
         lastActiveDate = try container.decodeIfPresent(Date.self, forKey: .lastActiveDate)
-        online = try container.decode(Bool.self, forKey: .online)
+        isOnline = try container.decode(Bool.self, forKey: .isOnline)
+        isInvisible = try container.decodeIfPresent(Bool.self, forKey: .isInvisible) ?? false
         isBanned = try container.decodeIfPresent(Bool.self, forKey: .isBanned) ?? false
-        role = try container.decode(Role.self, forKey: .role)
         devices = try container.decodeIfPresent([Device].self, forKey: .devices) ?? []
         mutedUsers = try container.decodeIfPresent([MutedUser].self, forKey: .mutedUsers) ?? []
         messagesUnreadCount = try container.decodeIfPresent(Int.self, forKey: .messagesUnreadCount) ?? 0
         channelsUnreadCount = try container.decodeIfPresent(Int.self, forKey: .channelsUnreadCount) ?? 0
+        extraData = ExtraData(ExtraData.decodableTypes.first(where: { $0.isUser })?.decode(from: decoder))
         
         if let name = try? container.decodeIfPresent(String.self, forKey: .name) {
             self.name = name
@@ -147,8 +167,16 @@ public struct User: Codable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
-        try container.encode(name, forKey: .name)
-        try container.encode(avatarURL, forKey: .avatarURL)
+        try container.encodeIfPresent(avatarURL, forKey: .avatarURL)
+        extraData?.encodeSafely(to: encoder, logMessage: "📦 when encoding a user extra data")
+        
+        if !name.isBlank {
+            try container.encode(name, forKey: .name)
+        }
+        
+        if isInvisible {
+            try container.encode(isInvisible, forKey: .isInvisible)
+        }
     }
 }
 

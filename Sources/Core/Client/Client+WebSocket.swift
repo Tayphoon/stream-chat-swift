@@ -9,59 +9,64 @@
 import Foundation
 
 extension Client {
-    func setupWebSocket(user: User, token: Token) -> WebSocket {
-        let logger: ClientLogger? = (logOptions == .all || logOptions == .webSocket ? ClientLogger(icon: "🦄") : nil)
+    func setupWebSocket(user: User, token: Token) -> WebSocket? {
+        if apiKey.isEmpty {
+            return nil
+        }
+        
+        let logger = logOptions.logger(icon: "🦄", for: [.webSocketError, .webSocket, .webSocketInfo])
         let jsonParameter = WebSocketPayload(user: user, token: token)
-        var jsonString = ""
-        
-        do {
-            let jsonData = try JSONEncoder.stream.encode(jsonParameter)
-            jsonString = String(data: jsonData, encoding: .utf8) ?? ""
-        } catch {
-            ClientLogger.log("🦄", error)
-        }
-        
-        if jsonString.isEmpty {
-            logger?.log("⚠️", "JSON payload URL is empty")
-        }
         
         var urlComponents = URLComponents()
         urlComponents.scheme = baseURL.wsURL.scheme
         urlComponents.host = baseURL.wsURL.host
         urlComponents.path = baseURL.wsURL.path.appending("connect")
         
-        urlComponents.queryItems = [URLQueryItem(name: "json", value: jsonString),
-                                    URLQueryItem(name: "api_key", value: apiKey),
+        urlComponents.queryItems = [URLQueryItem(name: "api_key", value: apiKey),
                                     URLQueryItem(name: "authorization", value: token),
                                     URLQueryItem(name: "stream-auth-type", value: "jwt")]
         
-        let url = urlComponents.url
-        
-        if url == nil {
-            logger?.log("⚠️", "Bad URL")
+        do {
+            let jsonData = try JSONEncoder.default.encode(jsonParameter)
+            
+            if let jsonString = String(data: jsonData, encoding: .utf8) {
+                urlComponents.queryItems?.append(URLQueryItem(name: "json", value: jsonString))
+            } else {
+                logger?.log("❌ Can't create a JSON parameter string from the json: \(jsonParameter)", level: .error)
+                return nil
+            }
+        } catch {
+            logger?.log(error)
+            return nil
         }
         
-        return WebSocket(URLRequest(url: url ?? baseURL.wsURL),
-                         stayConnectedInBackground: stayConnectedInBackground,
-                         logger: logger)
+        guard let url = urlComponents.url else {
+            logger?.log("❌ Bad URL: \(urlComponents)", level: .error)
+            return nil
+        }
+        
+        var request = URLRequest(url: url)
+        request.allHTTPHeaderFields = authHeaders(token: token)
+        
+        return WebSocket(request, stayConnectedInBackground: stayConnectedInBackground, logger: logger)
     }
 }
 
-fileprivate struct WebSocketPayload: Encodable {
+private struct WebSocketPayload: Encodable {
     private enum CodingKeys: String, CodingKey {
         case userId = "user_id"
-        case user = "user_details"
+        case userDetails = "user_details"
         case token = "user_token"
         case serverDeterminesConnectionId = "server_determines_connection_id"
     }
     
-    let user: User
+    let userDetails: User
     let userId: String
     let token: Token
     let serverDeterminesConnectionId = true
     
     init(user: User, token: Token) {
-        self.user = user
+        userDetails = user
         userId = user.id
         self.token = token
     }

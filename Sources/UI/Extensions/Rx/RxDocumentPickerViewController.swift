@@ -10,6 +10,7 @@ import Foundation
 import StreamChatCore
 import RxSwift
 import RxCocoa
+import UIKit
 
 extension UIDocumentPickerViewController: HasDelegate {
     public typealias Delegate = UIDocumentPickerDelegate
@@ -19,7 +20,7 @@ private final class RxUIDocumentPickerDelegateProxy: DelegateProxy<UIDocumentPic
                                                      DelegateProxyType,
                                                      UIDocumentPickerDelegate {
     
-    weak private (set) var controller: UIDocumentPickerViewController?
+    private (set) weak var controller: UIDocumentPickerViewController?
     
     init(controller: ParentObject) {
         self.controller = controller
@@ -41,8 +42,7 @@ extension Reactive where Base: UIDocumentPickerViewController {
     /// Tells that user has selected one or more documents.
     var didPickDocumentsAt: Observable<[URL]> {
         return delegate.methodInvoked(#selector(UIDocumentPickerDelegate.documentPicker(_:didPickDocumentsAt:)))
-            .map { $0.last as? [URL] }
-            .unwrap()
+            .compactMap { $0.last as? [URL] }
     }
     
     /// Tells that user canceled the document picker.

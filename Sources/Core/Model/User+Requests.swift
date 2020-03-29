@@ -13,6 +13,8 @@ import RxSwift
 
 public extension User {
     
+    internal static var flaggedUsers = [User]()
+    
     /// Update or create a user.
     ///
     /// - Returns: an observable updated user.
@@ -41,7 +43,7 @@ public extension User {
         }
         
         let request: Observable<EmptyData> = Client.shared.rx.request(endpoint: .unmuteUser(self))
-        return Client.shared.connectedRequest(request.map { _ in Void() }
+        return Client.shared.connectedRequest(request.void()
             // Remove unmuted user from the current user.
             .do(onNext: {
                 if let currentUser = User.current {
@@ -55,6 +57,42 @@ public extension User {
                     }
                 }
             }))
+    }
+    
+    // MARK: Flag User
+    
+    /// Checks if the user is flagged (locally).
+    var isFlagged: Bool {
+        return User.flaggedUsers.contains(self)
+    }
+    
+    /// Flag a user.
+    func flag() -> Observable<FlagUserResponse> {
+        guard !isCurrent else {
+            return .empty()
+        }
+        
+        return Client.shared.connectedRequest(flagUnflagUser(endpoint: .flagUser(self))
+            .do(onNext: { _ in User.flaggedUsers.append(self) }))
+    }
+     
+    /// Unflag a user.
+    func unflag() -> Observable<FlagUserResponse> {
+        guard !isCurrent else {
+            return .empty()
+        }
+        
+        return Client.shared.connectedRequest(flagUnflagUser(endpoint: .unflagUser(self))
+            .do(onNext: { _ in
+                if let index = User.flaggedUsers.firstIndex(where: { $0 == self }) {
+                    User.flaggedUsers.remove(at: index)
+                }
+            }))
+    }
+    
+    private func flagUnflagUser(endpoint: Endpoint) -> Observable<FlagUserResponse> {
+        return Client.shared.flagUnflag(endpoint: endpoint,
+                                        aleradyFlagged: FlagUserResponse(user: self, created: Date(), updated: Date()))
     }
 }
 
@@ -70,37 +108,33 @@ public struct UpdatedUsersResponse: Decodable {
     public let users: [String: User]
 }
 
-/// A muted users response.
-public struct MutedUsersResponse: Decodable {
-    private enum CodingKeys: String, CodingKey {
-        case mutedUser = "mute"
-        case currentUser = "own_user"
-    }
-    
-    /// A muted user.
-    public let mutedUser: MutedUser
-    /// The current user.
-    public let currentUser: User
-}
-
-/// A muted user.
-public struct MutedUser: Decodable {
-    private enum CodingKeys: String, CodingKey {
-        case user = "target"
-        case created = "created_at"
-        case updated = "updated_at"
-    }
-    
-    /// A muted user.
-    public let user: User
-    /// A created date.
-    public let created: Date
-    /// A updated date.
-    public let updated: Date
-}
-
 /// A response with a list of devices.
 public struct DevicesResponse: Decodable {
     /// A list of devices.
     public let devices: [Device]
+}
+
+/// A request object to ban a user.
+public struct UserBan: Encodable {
+    private enum CodingKeys: String, CodingKey {
+        case userId = "target_user_id"
+        case channelType = "type"
+        case channelId = "id"
+        case timeoutInMinutes = "timeout"
+        case reason
+    }
+    
+    let userId: String
+    let channelType: ChannelType
+    let channelId: String
+    let timeoutInMinutes: Int?
+    let reason: String?
+    
+    init(user: User, channel: Channel, timeoutInMinutes: Int?, reason: String?) {
+        userId = user.id
+        channelType = channel.type
+        channelId = channel.id
+        self.timeoutInMinutes = timeoutInMinutes
+        self.reason = reason
+    }
 }

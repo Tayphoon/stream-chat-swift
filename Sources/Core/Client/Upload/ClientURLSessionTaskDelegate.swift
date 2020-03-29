@@ -19,7 +19,11 @@ final class ClientURLSessionTaskDelegate: NSObject, URLSessionTaskDelegate {
                     totalBytesSent: Int64,
                     totalBytesExpectedToSend: Int64) {
         let progress = totalBytesExpectedToSend > 0 ? Float(Double(totalBytesSent) / Double(totalBytesExpectedToSend)) : 0
-        Client.shared.logger?.log("⏫ [\(task.taskIdentifier)] \(totalBytesSent)/\(totalBytesExpectedToSend), \((progress * 100).rounded())%")
+        
+        if totalBytesExpectedToSend > 10240 {
+            let message = "⏫ [\(task.taskIdentifier)] \(totalBytesSent)/\(totalBytesExpectedToSend), \((progress * 100).rounded())%"
+            Client.shared.logger?.log(message, level: .info)
+        }
         
         uploadProgress.onNext((task, progress, nil))
     }

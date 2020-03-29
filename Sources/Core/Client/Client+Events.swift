@@ -61,17 +61,15 @@ public extension Client {
         
         return connection.connected()
             .flatMapLatest { events }
-            .filter {
+            .filter({
                 if let channel = channel {
-                    if let eventChannelId = $0.channelId {
-                        return channel.type == $0.channelType && channel.id == eventChannelId
+                    if let cid = $0.cid {
+                        return channel.type == cid.type && channel.id == cid.id
                     }
-                    
                     return false
                 }
-                
                 return true
-            }
+            })
             .map { $0.event }
             .filter { (eventTypes.isEmpty && $0.type != .healthCheck) || eventTypes.contains($0.type) }
             .share()
@@ -90,17 +88,17 @@ extension Client {
     public var unreadCount: Driver<UnreadCount> {
         return Client.shared.connection.connected()
             // Subscribe for new messages and read events.
-            .flatMapLatest({ [weak self] _ in
+            .flatMapLatest({ [unowned self] _ in
                 Client.shared.webSocket.response
-                    .filter { self?.updateUnreadCount($0) ?? false }
-                    .map { _ in self?.unreadCountAtomic.get() }
-                    .startWith(self?.unreadCountAtomic.get())
+                    .filter { self.updateUnreadCount($0) }
+                    .map { _ in self.unreadCountAtomic.get() }
+                    .startWith(self.unreadCountAtomic.get())
                     .unwrap()
             })
             .startWith((0, 0))
             .map { "\($0.0), \($0.1)" }
             .distinctUntilChanged()
-            .map { [weak self] _ in self?.unreadCountAtomic.get() ?? (0, 0) }
+            .map { [unowned self] _ in self.unreadCountAtomic.get() ?? (0, 0) }
             .asDriver(onErrorJustReturn: (0, 0))
     }
     

@@ -15,8 +15,6 @@ public final class ChannelsPresenter: Presenter<ChatItem> {
     /// A callback type to provide an extra data for a channel.
     public typealias ChannelMessageExtraDataCallback = (_ channel: Channel) -> ChannelPresenter.MessageExtraDataCallback?
     
-    /// A channel type.
-    public let channelType: ChannelType
     /// Query options.
     public let queryOptions: QueryOptions
     /// Show channel statuses in a selected chat view controller.
@@ -41,22 +39,39 @@ public final class ChannelsPresenter: Presenter<ChatItem> {
     /// A callback to provide an extra data for a channel.
     public var channelMessageExtraDataCallback: ChannelMessageExtraDataCallback?
     
+    /// A filter for channels events.
+    public var eventsFilter: Event.Filter?
+    
+    /// A filter for a selected channel events.
+    /// When a user select a channel, then `ChannelsViewController` create a `ChatViewController`
+    /// with a selected channel presenter and this channel events filter.
+    public var channelEventsFilter: Event.Filter?
+    
     /// An observable view changes (see `ViewChanges`).
-    public private(set) lazy var changes = Driver.merge(requestChannels,
+    public private(set) lazy var changes = Driver.merge(parsedChannelResponses(channelsRequest),
+                                                        parsedChannelResponses(channelsDatabaseFetch),
                                                         webSocketEvents,
                                                         actions.asDriver(onErrorJustReturn: .none),
                                                         connectionErrors)
         .do(onDispose: { [weak self] in self?.disposeBagForInternalRequests = DisposeBag() })
     
-    private lazy var requestChannels: Driver<ViewChanges> = prepareRequest(startPaginationWith: pageSize)
-        .map { [weak self] in self?.channelsQuery(pagination: $0) }
-        .unwrap()
+    private lazy var channelsRequest: Observable<[ChannelResponse]> = prepareRequest(startPaginationWith: pageSize)
+        .compactMap { [weak self] in self?.channelsQuery(pagination: $0) }
         .flatMapLatest { Client.shared.channels(query: $0).retry(3) }
-        .map { [weak self] in self?.parseChannels($0) ?? .none }
-        .filter { $0 != .none }
-        .asDriver { Driver.just(ViewChanges.error(AnyError(error: $0))) }
+    
+    private lazy var channelsDatabaseFetch: Observable<[ChannelResponse]> = prepareDatabaseFetch(startPaginationWith: pageSize)
+        .compactMap { [weak self] in self?.channelsQuery(pagination: $0) }
+        .observeOn(SerialDispatchQueueScheduler(qos: .userInitiated))
+        .flatMapLatest { Client.shared.fetchChannels($0) }
     
     private lazy var webSocketEvents: Driver<ViewChanges> = Client.shared.webSocket.response
+        .filter({ [weak self] response in
+            if let eventsFilter = self?.eventsFilter {
+                return eventsFilter(response.event, nil)
+            }
+            
+            return true
+        })
         .map { [weak self] in self?.parseEvents(response: $0) ?? .none }
         .filter { $0 != .none }
         .asDriver { Driver.just(ViewChanges.error(AnyError(error: $0))) }
@@ -67,17 +82,14 @@ public final class ChannelsPresenter: Presenter<ChatItem> {
     /// Init a channels presenter.
     ///
     /// - Parameters:
-    ///   - channelType: a channel type.
     ///   - filter: a channel filter.
     ///   - sorting: a channel sorting. By default channels will be sorted by the last message date.
     ///   - queryOptions: query options (see `QueryOptions`).
     ///   - showChannelStatuses: show channel statuses on a chat view controller of a selected channel.
-    public init(channelType: ChannelType,
-                filter: Filter = .none,
+    public init(filter: Filter = .none,
                 sorting: [Sorting] = [],
                 queryOptions: QueryOptions = .all,
                 showChannelStatuses: Bool = true) {
-        self.channelType = channelType
         self.queryOptions = queryOptions
         self.showChannelStatuses = showChannelStatuses
         self.filter = filter
@@ -96,12 +108,14 @@ public extension ChannelsPresenter {
     
     /// Hide a channel and remove a channel presenter from items.
     ///
-    /// - Parameter channelPresenter: a channel presenter.
-    func hide(_ channelPresenter: ChannelPresenter) -> Driver<Void> {
+    /// - Parameters:
+    ///   - channelPresenter: a channel presenter.
+    ///   - clearHistory: checks if needs to remove a message history of the channel.
+    func hide(_ channelPresenter: ChannelPresenter, clearHistory: Bool = false) -> Driver<Void> {
         return channelPresenter.channel
-            .hide(for: User.current)
-            .map { _ in Void() }
-            .do(onNext: { [weak self] _ in self?.removeFromItems(channelPresenter) })
+            .hide(for: User.current, clearHistory: clearHistory)
+            .void()
+            .do(onNext: { [weak self] in self?.removeFromItems(channelPresenter) })
             .asDriver(onErrorJustReturn: ())
     }
     
@@ -124,6 +138,14 @@ public extension ChannelsPresenter {
 // MARK: - Response Parsing
 
 extension ChannelsPresenter {
+    
+    private func parsedChannelResponses(_ channelResponses: Observable<[ChannelResponse]>) -> Driver<ViewChanges> {
+        return channelResponses
+            .map { [weak self] in self?.parseChannels($0) ?? .none }
+            .filter { $0 != .none }
+            .asDriver { Driver.just(ViewChanges.error(AnyError(error: $0))) }
+    }
+    
     private func parseChannels(_ channels: [ChannelResponse]) -> ViewChanges {
         let isNextPage = next != pageSize
         var items = isNextPage ? self.items : [ChatItem]()
@@ -161,13 +183,26 @@ extension ChannelsPresenter {
 
 extension ChannelsPresenter {
     private func parseEvents(response: WebSocket.Response) -> ViewChanges {
-        guard let channelId = response.channelId else {
+        guard let cid = response.cid else {
             return parseNotifications(response: response)
         }
         
         switch response.event {
+        case .channelUpdated(let channelResponse, _):
+            if let index = items.firstIndex(where: channelResponse.channel.cid),
+                let channelPresenter = items[index].channelPresenter {
+                channelPresenter.parseEvents(event: response.event)
+                return .itemsUpdated([index], [], items)
+            }
+            
         case .channelDeleted:
-            if let index = items.firstIndex(whereChannelId: channelId, channelType: response.channelType) {
+            if let index = items.firstIndex(where: cid) {
+                items.remove(at: index)
+                return .itemRemoved(index, items)
+            }
+            
+        case .channelHidden:
+            if let index = items.firstIndex(where: cid) {
                 items.remove(at: index)
                 return .itemRemoved(index, items)
             }
@@ -176,10 +211,15 @@ extension ChannelsPresenter {
             return parseNewMessage(response: response, from: channel)
             
         case .messageDeleted(let message, _):
-            if let index = items.firstIndex(whereChannelId: channelId, channelType: response.channelType),
+            if let index = items.firstIndex(where: cid),
                 let channelPresenter = items[index].channelPresenter {
                 channelPresenter.parseEvents(event: response.event)
-                return .itemUpdated([index], [message], items)
+                return .itemsUpdated([index], [message], items)
+            }
+            
+        case .messageRead:
+            if let index = items.firstIndex(where: cid) {
+                return .itemsUpdated([index], [], items)
             }
             
         default:
@@ -199,7 +239,7 @@ extension ChannelsPresenter {
                 let index = items.firstIndex(whereChannelId: channel.id, channelType: channel.type),
                 let channelPresenter = items[index].channelPresenter {
                 channelPresenter.unreadMessageReadAtomic.set(nil)
-                return .itemUpdated([index], [], items)
+                return .itemsUpdated([index], [], items)
             }
         default:
             break
@@ -209,14 +249,14 @@ extension ChannelsPresenter {
     }
     
     private func parseNewMessage(response: WebSocket.Response, from channel: Channel?) -> ViewChanges {
-        if let channelId = response.channelId,
-            let index = items.firstIndex(whereChannelId: channelId, channelType: response.channelType),
+        if let cid = response.cid,
+            let index = items.firstIndex(where: cid),
             let channelPresenter = items.remove(at: index).channelPresenter {
             channelPresenter.parseEvents(event: response.event)
             items.insert(.channelPresenter(channelPresenter), at: 0)
             
             if index == 0 {
-                return .itemUpdated([0], [], items)
+                return .itemsUpdated([0], [], items)
             }
             
             return .itemMoved(fromRow: index, toRow: 0, items)
@@ -244,7 +284,7 @@ extension ChannelsPresenter {
             next = .channelsNextPageSize + .offset(next.offset + 1)
         }
         
-        return .itemAdded(0, nil, false, items)
+        return .itemsAdded([0], nil, false, items)
     }
     
     private func loadChannelMessages(_ channelPresenter: ChannelPresenter) {
@@ -258,7 +298,7 @@ extension ChannelsPresenter {
                     return
                 }
                 
-                self.actions.onNext(.itemUpdated([index], [], self.items))
+                self.actions.onNext(.itemsUpdated([index], [], self.items))
             })
             .disposed(by: disposeBagForInternalRequests)
     }

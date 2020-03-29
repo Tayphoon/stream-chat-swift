@@ -14,10 +14,15 @@ public protocol Database {
     /// A user owner of the database.
     var user: User? { get set }
     
+    /// A logger.
+    var logger: ClientLogger? { get }
+    
+    /// Delete all objects.
+    func deleteAll()
+    
     // MARK: Channels
     
     /// Fetch channels and messages from a database.
-    ///
     /// - Parameter query: a channels query
     /// - Returns: an observable channels response.
     func channels(_ query: ChannelsQuery) -> Observable<[ChannelResponse]>
@@ -25,7 +30,6 @@ public protocol Database {
     // MARK: Channel
     
     /// Fetch channel messages.
-    ///
     /// - Parameters:
     ///   - channelType: a channel type.
     ///   - channelId: a channel id.
@@ -34,54 +38,57 @@ public protocol Database {
     func channel(channelType: ChannelType, channelId: String, pagination: Pagination) -> Observable<ChannelResponse>
     
     /// Fetch message replies.
-    ///
     /// - Parameters:
     ///   - message: a parent message.
     ///   - pagination: a pagination.
     /// - Returns: an observable messages.
     func replies(for message: Message, pagination: Pagination) -> Observable<[Message]>
     
-    /// Add messages for a channel.
-    ///
+    /// Add channels with messages and members.
+    /// - Parameter channels: channel responses.
+    func add(channels: [ChannelResponse], query: ChannelsQuery)
+    
+    /// Add or update a channel.
+    /// - Parameter channel: a channel.
+    func addOrUpdate(channel: Channel)
+    
+    /// Add messages to a channel. The channel and members should be added/updated too.
     /// - Parameters:
     ///   - messages: messages of a channel
     ///   - channel: a channel
-    func add(messages: [Message], for channel: Channel)
+    func add(messages: [Message], to channel: Channel)
+    
+    // MARK: - Message
     
     /// Add replies for a message.
-    ///
     /// - Parameters:
     ///   - messages: replies.
     ///   - message: a parent message.
     func add(replies: [Message], for message: Message)
     
-    // MARK: Members
+    // MARK: - Members
     
     /// Set members for a channel.
-    ///
     /// - Parameters:
     ///   - members: members of a channel
     ///   - channel: a channel
-    func set(members: [Member], for channel: Channel)
+    func set(members: Set<Member>, for channel: Channel)
     
     /// Add a new member for a channel.
-    ///
     /// - Parameters:
-    ///   - member: a new member of a channel
+    ///   - member: a new members of a channel
     ///   - channel: a channel
-    func add(member: Member, for channel: Channel)
+    func add(members: Set<Member>, for channel: Channel)
     
     /// Remove a member from a channel.
-    ///
     /// - Parameters:
-    ///   - member: a member of a channel
+    ///   - member: members of a channel
     ///   - channel: a channel
-    func remove(member: Member, from channel: Channel)
+    func remove(members: Set<Member>, from channel: Channel)
     
     /// Update a member in a channel.
-    ///
     /// - Parameters:
-    ///   - member: a member of a channel
+    ///   - members: members of a channel
     ///   - channel: a channel
-    func update(member: Member, from channel: Channel)
+    func update(members: Set<Member>, from channel: Channel)
 }

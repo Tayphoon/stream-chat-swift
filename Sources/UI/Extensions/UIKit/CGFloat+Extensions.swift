@@ -11,6 +11,8 @@ import UIKit
 extension CGFloat {
     /// The screen width (alias to `UIScreen.main.bounds.width`).
     public static let screenWidth: CGFloat = UIScreen.main.bounds.width
+    /// The min screen width.
+    public static let minScreenWidth: CGFloat = Swift.min(UIScreen.main.bounds.width, UIScreen.main.bounds.height)
     /// The screen height (alias to `UIScreen.main.bounds.height`).
     public static let screenHeight: CGFloat = UIScreen.main.bounds.height
     /// A top safe area value.
@@ -18,11 +20,8 @@ extension CGFloat {
     /// A bottom safe area value.
     public static let safeAreaBottom: CGFloat = (UIApplication.shared.delegate?.window as? UIWindow)?.safeAreaInsets.bottom ?? 0
     
-    /// A channel big avatar size.
-    public static let channelBigAvatarSize: CGFloat = 40
-    
-    /// A chat bottom threshold for autoscroll down..
-    public static let chatBottomThreshold: CGFloat = .messageAvatarSize + 2 * .messageVerticalInset + .messagesToComposerPadding
+    /// A channel avatar radius.
+    public static let channelAvatarRadius: CGFloat = 20
     
     /// A chat footer hight.
     public static let chatFooterHeight: CGFloat = 30
@@ -70,8 +69,6 @@ extension CGFloat {
     /// A composer file icon width.
     public static let composerFileIconWidth: CGFloat = 25
     
-    /// A message to composer padding.
-    public static let messagesToComposerPadding: CGFloat = .composerHeight + 2 * .messageEdgePadding
     /// A message avatar radius.
     public static let messageAvatarRadius: CGFloat = 16
     /// A message avatar size.
@@ -92,6 +89,8 @@ extension CGFloat {
     public static let messageVerticalInset: CGFloat = 5
     /// A message text padding with avatar,
     public static let messageTextPaddingWithAvatar: CGFloat = .messageEdgePadding + .messageAvatarSize + .messageInnerPadding
+    /// A name and date height for a message.
+    public static let messageNameAndDateHeight: CGFloat = .messageAvatarRadius - .messageSpacing
     
     /// A message read users avatar border width.
     public static let messageReadUsersAvatarBorderWidth: CGFloat = 1
@@ -101,7 +100,7 @@ extension CGFloat {
     public static let messageReadUsersSize: CGFloat = 2 * .messageReadUsersAvatarCornerRadius
     
     /// A message status line width.
-    public static let messageStatusLineWidth: CGFloat = 1
+    public static let messageStatusLineWidth: CGFloat = 0.5
     /// A message status spacing.
     public static let messageStatusSpacing: CGFloat = 26
     
@@ -113,7 +112,7 @@ extension CGFloat {
     /// An attachment preview max width.
     public static let attachmentPreviewMaxWidth: CGFloat = UIDevice.isPad
         ? (4 * .attachmentPreviewMaxHeight / 3).rounded()
-        : UIScreen.main.bounds.width - 2 * .messageTextPaddingWithAvatar
+        : .minScreenWidth - 2 * .messageTextPaddingWithAvatar
     
     /// A message attachment preview action button height.
     public static let attachmentPreviewActionButtonHeight: CGFloat = 2 * .messageCornerRadius
@@ -155,6 +154,6 @@ extension CGFloat {
     public static let bannerHeight: CGFloat = 60
     public static let bannerWidth: CGFloat = .screenWidth - 2 * .messageEdgePadding
     public static let bannerCornerRadius: CGFloat = 10
-    public static let bannerTopOffset: CGFloat = .safeAreaTop + .messageEdgePadding
+    public static let bannerTopOffset: CGFloat = .safeAreaTop
     public static let bannerMaxY: CGFloat = .bannerHeight + .bannerTopOffset + .composerHelperShadowRadius
 }

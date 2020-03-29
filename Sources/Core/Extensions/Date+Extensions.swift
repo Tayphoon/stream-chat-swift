@@ -9,7 +9,7 @@
 import Foundation
 
 extension Date {
-    static let `default` = Date()
+    public static let `default` = Date()
 }
 
 extension Date {
@@ -44,7 +44,7 @@ extension Date {
             return DateFormatter.weekDay.string(from: self).appending(Date.wordsSeparator).appending(timeString)
         }
         
-        return DateFormatter.shortDate.string(from: self)
+        return DateFormatter.shortDate.string(from: self).appending(Date.wordsSeparator).appending(timeString)
     }
     
     /// Generates a filename from the date.

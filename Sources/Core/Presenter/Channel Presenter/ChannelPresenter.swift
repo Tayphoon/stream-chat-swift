@@ -17,16 +17,35 @@ public final class ChannelPresenter: Presenter<ChatItem> {
     /// A callback type for the adding an extra data for a new message.
     public typealias MessageExtraDataCallback =
         (_ id: String, _ text: String, _ attachments: [Attachment], _ parentId: String?) -> Codable?
+    /// A callback type for the adding an extra data for a new reaction.
+    public typealias ReactionExtraDataCallback = (_ reactionType: ReactionType, _ score: Int, _ messageId: String) -> Codable?
     
     /// A callback for the adding an extra data for a new message.
     public var messageExtraDataCallback: MessageExtraDataCallback?
+    /// A callback for the adding an extra data for a new message.
+    public var reactionExtraDataCallback: ReactionExtraDataCallback?
     
     private let channelType: ChannelType
     private let channelId: String
-    let channelAtomic = Atomic<Channel>()
+    private let channelPublishSubject = PublishSubject<Channel>()
+    
+    private(set) lazy var channelAtomic = Atomic<Channel> { [weak self] channel, oldChannel in
+        if let channel = channel {
+            if let oldChannel = oldChannel {
+                channel.banEnabling = oldChannel.banEnabling
+            }
+            
+            self?.channelPublishSubject.onNext(channel)
+        }
+    }
     
     /// A channel (see `Channel`).
     public var channel: Channel { return channelAtomic.get(defaultValue: .unused) }
+    
+    /// An observable channel (see `Channel`).
+    public internal(set) lazy var channelDidUpdate: Driver<Channel> = channelPublishSubject
+        .asDriver(onErrorJustReturn: Channel(type: channelType, id: channelId))
+    
     /// A parent message for replies.
     public let parentMessage: Message?
     /// Query options.
@@ -36,7 +55,6 @@ public final class ChannelPresenter: Presenter<ChatItem> {
     /// Show statuses separators, e.g. Today
     public private(set) var showStatuses = true
     
-    private var startedTyping = false
     let lastMessageAtomic = Atomic<Message>()
     
     /// The last parsed message from WebSocket events.
@@ -60,6 +78,11 @@ public final class ChannelPresenter: Presenter<ChatItem> {
         return channel.config.readEventsEnabled && unreadMessageReadAtomic.get() != nil
     }
     
+    /// The current user message read state.
+    public var messageRead: MessageRead? {
+        return unreadMessageReadAtomic.get()
+    }
+    
     /// Check if the channel has ephemeral message, e.g. Giphy preview.
     public var hasEphemeralMessage: Bool { return ephemeralMessage != nil }
     /// An ephemeral message, e.g. Giphy preview.
@@ -69,6 +92,9 @@ public final class ChannelPresenter: Presenter<ChatItem> {
     public var canReply: Bool {
         return parentMessage == nil && channel.config.repliesEnabled
     }
+    
+    /// A filter to discard channel events.
+    public var eventsFilter: Event.Filter?
     
     /// An observable view changes (see `ViewChanges`).
     public private(set) lazy var changes =
@@ -89,10 +115,13 @@ public final class ChannelPresenter: Presenter<ChatItem> {
                 }
                 
                 return Driver.merge(
+                    // Messages from requests.
                     self.parentMessage == nil ? self.parsedMessagesRequest : self.parsedRepliesResponse(self.repliesRequest),
+                    // Messages from database.
                     self.parentMessage == nil
                         ? self.parsedChannelResponse(self.messagesDatabaseFetch)
                         : self.parsedRepliesResponse(self.repliesDatabaseFetch),
+                    // Events from a websocket.
                     self.webSocketEvents,
                     self.ephemeralMessageEvents,
                     self.connectionErrors
@@ -126,6 +155,13 @@ public final class ChannelPresenter: Presenter<ChatItem> {
         .flatMapLatest { [weak self] in self?.parentMessage?.fetchReplies(pagination: $0) ?? .empty() }
     
     private lazy var webSocketEvents: Driver<ViewChanges> = Client.shared.onEvent(channel: channel)
+        .filter({ [weak self] event in
+            if let eventsFilter = self?.eventsFilter {
+                return eventsFilter(event, self?.channel)
+            }
+            
+            return true
+        })
         .map { [weak self] in self?.parseEvents(event: $0) ?? .none }
         .filter { $0 != .none }
         .map { [weak self] in self?.mapWithEphemeralMessage($0) ?? .none }
@@ -150,11 +186,11 @@ public final class ChannelPresenter: Presenter<ChatItem> {
     public init(channel: Channel, parentMessage: Message? = nil, queryOptions: QueryOptions = .all, showStatuses: Bool = true) {
         channelType = channel.type
         channelId = channel.id
-        channelAtomic.set(channel)
         self.parentMessage = parentMessage
         self.queryOptions = queryOptions
         self.showStatuses = showStatuses
         super.init(pageSize: .messagesPageSize)
+        channelAtomic.set(channel)
     }
     
     /// Init a presenter with a given channel query.
@@ -165,7 +201,6 @@ public final class ChannelPresenter: Presenter<ChatItem> {
     public init(response: ChannelResponse, queryOptions: QueryOptions, showStatuses: Bool = true) {
         channelType = response.channel.type
         channelId = response.channel.id
-        channelAtomic.set(response.channel)
         parentMessage = nil
         self.queryOptions = queryOptions
         self.showStatuses = showStatuses
@@ -186,7 +221,7 @@ extension ChannelPresenter {
         let messageId = editMessage?.id ?? ""
         var attachments = uploader.items.compactMap({ $0.attachment })
         let parentId = parentMessage?.id
-        var extraData: Codable? = nil
+        var extraData: Codable?
         
         if attachments.isEmpty, let editMessage = editMessage, !editMessage.attachments.isEmpty {
             attachments = editMessage.attachments
@@ -211,11 +246,11 @@ extension ChannelPresenter {
         }
         
         let message = Message(id: messageId,
+                              parentId: parentId,
                               text: text,
                               attachments: attachments,
-                              extraData: extraData,
-                              parentId: parentId,
                               mentionedUsers: mentionedUsers,
+                              extraData: extraData,
                               showReplyInChannel: false)
         
         return channel.send(message: message)
@@ -227,27 +262,7 @@ extension ChannelPresenter {
 // MARK: - Send Event
 
 extension ChannelPresenter {
-    /// Send a typing event.
-    public func sendEvent(isTyping: Bool) -> Observable<Event> {
-        guard parentMessage == nil else {
-            return .empty()
-        }
-        
-        if isTyping {
-            if !startedTyping {
-                startedTyping = true
-                return channel.send(eventType: .typingStart).observeOn(MainScheduler.instance)
-            }
-        } else if startedTyping {
-            startedTyping = false
-            return channel.send(eventType: .typingStop).observeOn(MainScheduler.instance)
-        }
-        
-        return .empty()
-    }
-    
     /// Send Read event if the app is active.
-    ///
     /// - Returns: an observable completion.
     public func markReadIfPossible() -> Observable<Void> {
         guard InternetConnection.shared.isAvailable, channel.config.readEventsEnabled else {
@@ -255,7 +270,7 @@ extension ChannelPresenter {
         }
         
         guard let unreadMessageRead = unreadMessageReadAtomic.get() else {
-            Client.shared.logger?.log("🎫", "Skip read. No unreadMessageRead.")
+            Client.shared.logger?.log("🎫 Skip read. No unreadMessageRead.")
             return .empty()
         }
         
@@ -264,17 +279,20 @@ extension ChannelPresenter {
         return Observable.just(())
             .subscribeOn(MainScheduler.instance)
             .filter { UIApplication.shared.appState == .active }
-            .do(onNext: { Client.shared.logger?.log("🎫", "Send Message Read. Unread from \(unreadMessageRead.lastReadDate)") })
+            .do(onNext: {
+                Client.shared.logger?.log("🎫 Send Message Read. Unread from \(unreadMessageRead.lastReadDate)")
+            })
             .flatMapLatest { [weak self] in self?.channel.markRead() ?? .empty() }
             .do(
                 onNext: { [weak self] _ in
                     self?.unreadMessageReadAtomic.set(nil)
-                    Client.shared.logger?.log("🎫", "Message Read done.")
+                    self?.channel.unreadCountAtomic.set(0)
+                    Client.shared.logger?.log("🎫 Message Read done.")
                 },
                 onError: { [weak self] error in
                     self?.unreadMessageReadAtomic.set(unreadMessageRead)
-                    ClientLogger.log("🎫", error, message: "Send Message Read error.")
+                    Client.shared.logger?.log(error, message: "🎫 Send Message Read error.")
             })
-            .map { _ in Void() }
+            .void()
     }
 }
