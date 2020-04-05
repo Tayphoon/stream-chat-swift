@@ -113,7 +113,7 @@ open class ChatViewController: ViewController, UITableViewDataSource, UITableVie
     /// A channel presenter.
     public var channelPresenter: ChannelPresenter? {
         didSet {
-            if let presenter = newValue {
+            if let presenter = channelPresenter {
                 configure(with: presenter)
             }
         }
