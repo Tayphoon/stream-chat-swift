@@ -53,7 +53,6 @@ extension ViewController {
         
         let delegate = ImagePickerDelegate(completion) {
             objc_setAssociatedObject(self, delegateKey, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-            completion(nil, .notDetermined)
         }
         
         imagePickerViewController.delegate = delegate
