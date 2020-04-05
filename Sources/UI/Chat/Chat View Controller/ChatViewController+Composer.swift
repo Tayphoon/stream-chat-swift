@@ -96,28 +96,35 @@ extension ChatViewController {
     }
     
     func setupComposerView() {
-        guard composerView.superview == nil, let presenter = channelPresenter else {
-            return
-        }
-        
-        composerView.attachmentButton.isHidden = composerAddFileContainerView == nil
-        composerView.addToSuperview(view)
-        
-        if let composerAddFileContainerView = composerAddFileContainerView {
-            composerAddFileContainerView.add(to: composerView)
+        if composerView.superview == nil {
+            composerView.attachmentButton.isHidden = composerAddFileContainerView == nil
+            composerView.addToSuperview(view)
             
-            composerView.attachmentButton.rx.tap
-                .subscribe(onNext: { [weak self] in self?.showAddFileView() })
+            if let composerAddFileContainerView = composerAddFileContainerView {
+                composerAddFileContainerView.add(to: composerView)
+                
+                composerView.attachmentButton.rx.tap
+                    .subscribe(onNext: { [weak self] in self?.showAddFileView() })
+                    .disposed(by: disposeBag)
+            }
+                                
+            composerView.sendButton.rx.tap
+                .subscribe(onNext: { [weak self] in self?.send() })
+                .disposed(by: disposeBag)
+            
+            keyboard.notification
+                .filter { $0.isHidden }
+                .subscribe(onNext: { [weak self] _ in self?.showCommands(show: false) })
                 .disposed(by: disposeBag)
         }
-        
-        let textViewEvents = composerView.textView.rx.text.skip(1).unwrap().share()
-        
-        // Dispatch commands from text view.
-        textViewEvents.subscribe(onNext: { [weak self] in self?.dispatchCommands(in: $0) }).disposed(by: disposeBag)
-        
+                
         // Send typing events.
-        if presenter.channel.config.typingEventsEnabled, presenter.parentMessage == nil {
+        if let presenter = channelPresenter, presenter.channel.config.typingEventsEnabled, presenter.parentMessage == nil {
+            let textViewEvents = composerView.textView.rx.text.skip(1).unwrap().share()
+            
+            // Dispatch commands from text view.
+            textViewEvents.subscribe(onNext: { [weak self] in self?.dispatchCommands(in: $0) }).disposed(by: disposeBag)
+
             Observable.merge([textViewEvents.map { _ in true },
                               textViewEvents.debounce(.seconds(3), scheduler: MainScheduler.instance).map { _ in false }])
                 .distinctUntilChanged()
@@ -127,15 +134,6 @@ extension ChatViewController {
                 .subscribe()
                 .disposed(by: disposeBag)
         }
-        
-        composerView.sendButton.rx.tap
-            .subscribe(onNext: { [weak self] in self?.send() })
-            .disposed(by: disposeBag)
-        
-        keyboard.notification
-            .filter { $0.isHidden }
-            .subscribe(onNext: { [weak self] _ in self?.showCommands(show: false) })
-            .disposed(by: disposeBag)
     }
     
     private func dispatchCommands(in text: String) {

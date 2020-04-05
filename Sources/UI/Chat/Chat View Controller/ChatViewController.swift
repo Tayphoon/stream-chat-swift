@@ -112,7 +112,7 @@ open class ChatViewController: ViewController, UITableViewDataSource, UITableVie
     
     /// A channel presenter.
     public var channelPresenter: ChannelPresenter? {
-        willSet {
+        didSet {
             if let presenter = newValue {
                 configure(with: presenter)
             }
@@ -134,6 +134,8 @@ open class ChatViewController: ViewController, UITableViewDataSource, UITableVie
         
         if let presenter = channelPresenter {
             configure(with: presenter)
+        } else {
+            setupComposerView()
         }
 
         setupFooterUpdates()
